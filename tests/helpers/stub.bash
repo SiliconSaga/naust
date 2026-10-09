@@ -104,3 +104,30 @@ YAML
 }
 
 run_naust() { run bash "$NAUST" "$@"; }
+
+# A real repository on <branch> with one commit. Job tests add a remote.
+make_bay_repo() { # <dir> <branch>
+  local dir="$1" branch="$2"
+  mkdir -p "$dir"
+  git -C "$dir" init -q -b "$branch"
+  git -C "$dir" config core.autocrlf false
+  git -C "$dir" config user.email t@example.invalid
+  git -C "$dir" config user.name T
+  printf 'seed\n' > "$dir/seed.txt"
+  git -C "$dir" add seed.txt
+  git -C "$dir" commit -qm seed
+}
+
+# A bay the shape ws bay add leaves, with a naust state file: a ws that
+# records calls as "bayws …", the realm directory, a real component repo
+# holding one real nested module.
+make_bay() { # <name> <state>
+  local dir="$NAUST_WORKSPACE/bays/$1"
+  mkdir -p "$dir/scripts" "$dir/components" "$dir/realms/realm-test" "$NAUST_DIR/state/bays"
+  printf '#!/usr/bin/env bash\necho "bayws $*" >> "$STUB_LOG"\n' > "$dir/scripts/ws"
+  chmod +x "$dir/scripts/ws"
+  printf 'state=%s\nprofile=terasology\njob=\nsince=%s\n' "$2" "$NAUST_NOW" > "$NAUST_DIR/state/bays/$1.state"
+  make_bay_repo "$dir/components/terasology" develop
+  make_bay_repo "$dir/components/terasology/modules/Cooking" develop
+  BAY_DIR="$dir"
+}
