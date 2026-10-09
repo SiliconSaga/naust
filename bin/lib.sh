@@ -22,10 +22,12 @@ die() { log "ERROR: $*"; [ -n "${NAUST_LOG:-}" ] && printf 'naust: ERROR: %s\n' 
 now() { printf '%s\n' "${NAUST_NOW:-$(date +%s)}"; }
 require_tool() { command -v "$1" >/dev/null 2>&1 || die "'$1' is required but not on PATH"; }
 
-# One scalar from a YAML file, with a default when absent or null.
+# One scalar from a YAML file, with a default when absent or null. Not
+# `path // default`: yq treats a YAML false as missing under //, and
+# `skip_drafts: false` must read back as false.
 _yq_scalar() { # <file> <path> [default]
   local v=""
-  [ -f "$1" ] && { v="$(yq "$2 // \"\"" "$1" 2>/dev/null)" || v=""; }
+  [ -f "$1" ] && { v="$(yq "$2" "$1" 2>/dev/null)" || v=""; }
   if [ -z "$v" ] || [ "$v" = "null" ]; then printf '%s\n' "${3:-}"; else printf '%s\n' "$v"; fi
 }
 # A YAML list, one item per line (empty when absent).
