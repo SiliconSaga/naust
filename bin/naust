@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# naust — the boathouse. Keeps bays (child workspaces under bays/) busy with
+# pull requests. `naust tick` is what the scheduler calls.
+set -euo pipefail
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+usage() {
+  cat <<'USAGE'
+Usage: naust <command> [args]
+
+  tick                         poll, gate, queue, run one job, exit (the scheduled entry point)
+  bay add <name> --profile <p> make a bay (ws bay add, then warm it for the profile)
+  bay reset <name> [--deep]    reset a bay to base; --deep also drops Gradle outputs
+  bay list                     every bay with its state
+  bay release <name>           hand a ready or held bay back to the pool
+  run <profile> <n> [--with <target>#<n>]... [--bay <name>]
+                               queue a PR by hand, ahead of polled ones
+  report render <jobdir>       re-render a job's report.md and comment.md
+  notify say <text> [--file <path>]
+                               post to the Discord webhook
+
+Config: bays/.naust/naust.yaml in this workspace (see naust.example.yaml);
+secrets in the workspace .env (NAUST_GITHUB_TOKEN, NAUST_DISCORD_WEBHOOK).
+USAGE
+}
+
+cmd="${1:-}"
+case "$cmd" in
+  ""|-h|--help|help) usage; exit 0 ;;
+  tick|bay|run|job|report|notify)
+    shift
+    exec bash "$HERE/$cmd.sh" "$@" ;;
+  *) echo "naust: unknown command '$cmd'" >&2; usage >&2; exit 2 ;;
+esac
