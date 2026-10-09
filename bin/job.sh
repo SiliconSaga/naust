@@ -33,6 +33,7 @@ with_token() { if [ -n "$token" ]; then GH_TOKEN="$token" "$@"; else "$@"; fi; }
 export NAUST_JOB_DIR="$JOB" NAUST_PR_NUMBER="$number" NAUST_PR_HEAD="$head"
 
 FAILED=0
+HEAD_MOVED=0
 record() { printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" >> "$STEPS"; }
 skip() { record "$1" "$2" skipped 0; }
 skip_all() { local s; for s in "$@"; do skip "${s%% *}" "${s#* }"; done; }   # "<id> <name>" pairs
@@ -63,17 +64,19 @@ comp_remote() {
 
 step_reset() { bash "$HERE/bay.sh" reset "$BAY" --keep "$JOBID" && bash "$HERE/bay.sh" set "$BAY" busy; }
 
+# A step function runs as an if-condition, which turns errexit off inside it,
+# so every command that must not be skipped past carries its own || return 1.
 step_checkout() {
   local w target n remote
   remote="$(comp_remote)" || return 1
-  in_bay checkout "$COMP" --cr "$number"
+  in_bay checkout "$COMP" --cr "$number" || return 1
   for w in ${with//,/ }; do
     target="${w%#*}"; n="${w##*#}"
-    in_bay checkout "$target" --cr "$n"
+    in_bay checkout "$target" --cr "$n" || { echo "linked change request $w could not be checked out"; return 1; }
   done
-  git -C "$NAUST_COMP_DIR" fetch -q "$remote" "$base"
-  HEAD_SHA="$(git -C "$NAUST_COMP_DIR" rev-parse HEAD)"
-  MERGE_BASE="$(git -C "$NAUST_COMP_DIR" merge-base HEAD "$remote/$base")"
+  git -C "$NAUST_COMP_DIR" fetch -q "$remote" "$base" || { echo "cannot fetch base branch $base from $remote"; return 1; }
+  HEAD_SHA="$(git -C "$NAUST_COMP_DIR" rev-parse HEAD)" || return 1
+  MERGE_BASE="$(git -C "$NAUST_COMP_DIR" merge-base HEAD "$remote/$base")" || { echo "no merge base between the change request and $remote/$base"; return 1; }
   {
     printf 'repo: %s\nnumber: %s\nhead: %s\nbase: %s\nmerge_base: %s\n' "$repo" "$number" "$head" "$base" "$MERGE_BASE"
     printf 'author: %s\nhead_repo: %s\nwith: %s\nbay: %s\nstarted: %s\n' "$author" "$head_repo" "$with" "$BAY" "$(now)"
@@ -81,6 +84,7 @@ step_checkout() {
   } > "$JOB/job.yaml"
   if [ "$HEAD_SHA" != "$head" ]; then
     echo "head moved: the gate admitted $head, the fetch returned $HEAD_SHA; a new nod is needed for the new head"
+    HEAD_MOVED=1
     return 1
   fi
 }
@@ -113,8 +117,11 @@ step_scope() {
 }
 
 # Run every line of scope.txt and gather the JUnit XML it produced into <dest>.
+# Verdicts come from the XML, not the exit codes, so a failing test does not
+# fail the step; a run that produced no XML at all did not test anything, and
+# that does.
 run_scope() { # <dest>
-  local dest="$1" marker kind name task x rel rc
+  local dest="$1" marker kind name task x rel rc gathered=0
   mkdir -p "$dest"
   marker="$(mktemp)"
   : > "$dest/runs.tsv"
@@ -131,14 +138,22 @@ run_scope() { # <dest>
   while IFS= read -r -d '' x; do
     rel="${x#"$NAUST_COMP_DIR"/}"
     cp "$x" "$dest/$(printf '%s' "$rel" | tr '/' '_')"
+    gathered=$((gathered + 1))
   done < <(find "$NAUST_COMP_DIR" -path '*/build/test-results/*' -name '*.xml' -newer "$marker" -print0)
   rm -f "$marker"
+  if [ "$gathered" -eq 0 ]; then
+    echo "no test reports were produced; exit codes were: $(tr '\n' ';' < "$dest/runs.tsv")"
+    return 1
+  fi
+  echo "$gathered report files gathered"
 }
 
 step_baseline() {
-  git -C "$NAUST_COMP_DIR" switch -q --detach "$MERGE_BASE"
-  run_scope "$JOB/baseline"
-  git -C "$NAUST_COMP_DIR" switch -q "cr/$number"
+  local rc=0
+  git -C "$NAUST_COMP_DIR" switch -q --detach "$MERGE_BASE" || return 1
+  run_scope "$JOB/baseline" || rc=1
+  git -C "$NAUST_COMP_DIR" switch -q "cr/$number" || rc=1
+  return "$rc"
 }
 step_build() { in_bay build "$COMP"; }
 step_compile_all() { profile_cmd .steps.compile_all; }
@@ -207,8 +222,15 @@ else
   skip_all "2 checkout" "3 scope" "4 baseline" "5 build" "5b compile-all" "5c tests" "6 headless" "7 smoke" "8 tree"
 fi
 run_step 9 report step_report || true
+# A bay with a finished job waits for a human. A broken reset keeps the bay
+# broken, and a head that moved before anything was built leaves nothing to
+# look at, so that bay goes straight back to the pool.
 if [ "$(bash "$HERE/bay.sh" list | awk -F'\t' -v b="$BAY" '$1 == b { print $2 }')" != broken ]; then
-  bash "$HERE/bay.sh" set "$BAY" ready
+  if [ "$HEAD_MOVED" -eq 1 ]; then
+    bash "$HERE/bay.sh" set "$BAY" free
+  else
+    bash "$HERE/bay.sh" set "$BAY" ready
+  fi
 fi
 log "job $JOBID: done, failed=$FAILED, outputs in $JOB"
 exit "$FAILED"

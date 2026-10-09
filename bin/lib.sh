@@ -67,10 +67,13 @@ load_config() {
 }
 
 # Everything that runs inside a bay goes through the parent's `ws bay exec`,
-# which runs the bay's own ws from the bay with this workspace's roots unset.
+# which runs the bay's own ws from the bay with this workspace's roots and
+# every key its .env defines unset. GH_TOKEN is passed through only when the
+# caller set it on purpose: job.sh unsets it first thing and sets it for the
+# two review calls alone, so nothing the PR controls ever sees a token.
 bay_ws() { # <bay> <ws-args...>
   local bay="$1"; shift
-  bash "$WS" bay exec "$bay" "$@"
+  bash "$WS" bay exec ${GH_TOKEN:+--pass GH_TOKEN} "$bay" "$@"
 }
 
 # Read one value out of the workspace's .env, literally: the optional `export `
@@ -106,13 +109,26 @@ kv_set() { # <file> <key> <value>
   mv "$tmp" "$file"
 }
 
+# A file's modification time as an epoch, on GNU (Linux, Git Bash) and BSD
+# (macOS) stat alike. Fails when neither form works.
+file_mtime() { # <path>
+  stat -c %Y "$1" 2>/dev/null && return 0
+  stat -f %m "$1" 2>/dev/null
+}
+
 # The tick lock: a directory, because mkdir is atomic everywhere. Holds the pid
 # of the tick that took it. A lock older than LOCK_STALE_HOURS belongs to a tick
-# that died without cleaning up and is reclaimed; a job never runs that long.
+# that died without cleaning up and is reclaimed; a job never runs that long. A
+# lock whose age cannot be read is treated as fresh: two jobs on one host is
+# the worse failure.
 with_lock() {
-  local lock="$STATE_DIR/lock" age
+  local lock="$STATE_DIR/lock" age mtime
   if ! mkdir "$lock" 2>/dev/null; then
-    age=$(( $(now) - $(stat -c %Y "$lock" 2>/dev/null || echo 0) ))
+    if ! mtime="$(file_mtime "$lock")"; then
+      log "cannot read the age of $lock; treating it as held"
+      return 1
+    fi
+    age=$(( $(now) - mtime ))
     if [ "$age" -gt $(( LOCK_STALE_HOURS * 3600 )) ]; then
       log "reclaiming a lock $age s old (pid $(cat "$lock/pid" 2>/dev/null || echo '?'))"
       rm -rf "$lock"

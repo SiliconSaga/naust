@@ -43,7 +43,9 @@ naust_setup() {
 echo "ws $*" >> "$STUB_LOG"
 case "$1 $2" in
   "bay exec")
-    bay="$3"; shift 3
+    shift 2
+    while [ "$1" = --pass ]; do shift 2; done     # the real verb scrubs .env keys except these
+    bay="$1"; shift
     ws="$NAUST_WORKSPACE/bays/$bay/scripts/ws"
     [ -x "$ws" ] || exit "${WS_EXIT:-0}"
     cd "$NAUST_WORKSPACE/bays/$bay" && exec bash "$ws" "$@" ;;

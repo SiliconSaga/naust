@@ -25,7 +25,7 @@ What a job does and which commands it uses for a given project is a *profile* in
 ## Day to day
 
 - `naust bay list` — every bay naust knows, its state (`free busy ready held broken`), its job and how long it has been in that state. `ws bay list` shows the workspaces themselves.
-- `naust run terasology 5400 [--with terasology/modules/Health#12] [--bay bay-2]` — queue a PR by hand, ahead of polled ones. The trust gate still applies.
+- `naust run terasology 5400 [--with terasology/modules/Health#12] [--bay bay-2]` — queue a PR by hand, ahead of polled ones. The trust gate still applies to the PR; a `--with` target is your own vouch, fetched and built as given, since only an operator can name one.
 - A `ready` bay holds a finished job until you `naust bay release <name>` it or `bay.ready_ttl_days` passes. Open the bay's `.outputs/naust/<job>/report.md`, run the game from the bay's component directory, decide on GitHub.
 - `naust bay reset <name>` puts a bay back to base by hand; `--deep` also drops Gradle outputs. A `broken` bay needs that after you fix whatever the tick log names.
 - `naust report render <jobdir>` re-renders a report; `naust notify say <text>` tests the webhook.

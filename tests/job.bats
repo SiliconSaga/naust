@@ -16,6 +16,7 @@ case "$1 $2" in
   "checkout terasology/modules/Cooking") ;;
   "build terasology") echo "build GH_TOKEN=${GH_TOKEN:-unset}" >> "$STUB_LOG"; exit "${WS_BUILD_EXIT:-0}" ;;
   "test terasology")
+    [ -z "${WS_TEST_BROKEN:-}" ] || exit 1              # a run that produced nothing
     mkdir -p "$comp/engine-tests/build/test-results/unitTest"
     printf '<testsuite name="%s" tests="1" failures="0" errors="0" skipped="0"><testcase name="t" classname="%s"/></testsuite>\n' "${3:-all}" "${3:-all}" \
       > "$comp/engine-tests/build/test-results/unitTest/TEST-${3:-all}.xml" ;;
@@ -104,14 +105,17 @@ bay_state() { sed -n 's/^state=//p' "$NAUST_DIR/state/bays/bay-1.state"; }
     [ -f "$NAUST_DIR/state/jobs/MovingBlocks__Terasology-7-${PR_SHA:0:7}/report.md" ]
     [ "$(bay_state)" = "ready" ]
     grep -q "Checks: 1 pass" "$JOB/checks.txt"
-    # the machine account's token reaches the report's review calls and nothing the PR controls
+    # the machine account's token reaches the report's review calls and nothing the PR controls:
+    # only those two calls ask ws bay exec to pass GH_TOKEN through its .env scrub
     grep -q '^build GH_TOKEN=unset$' "$STUB_LOG"
     grep -q '^smoke GH_TOKEN=unset$' "$STUB_LOG"
     [ "$(grep -c '^review GH_TOKEN=tok$' "$STUB_LOG")" -eq 2 ]
+    [ "$(grep -c '^ws bay exec --pass GH_TOKEN bay-1 review terasology' "$STUB_LOG")" -eq 2 ]
+    grep -q '^ws bay exec bay-1 build terasology$' "$STUB_LOG"
     ! grep -q 'leaked-from-the-tick' "$STUB_LOG"
 }
 
-@test "a PR that moved after the gate stops at checkout and says so" {
+@test "a PR that moved after the gate stops at checkout, says so, and frees the bay" {
     publish_bay_pr                                  # moves refs/pull/7/head past the gated head
     run_naust job bay-1 "$JOBFILE"
     [ "$status" -ne 0 ]
@@ -122,7 +126,24 @@ bay_state() { sed -n 's/^state=//p' "$NAUST_DIR/state/bays/bay-1.state"; }
     grep -q 'head moved' "$JOB/checkout.log"
     [ "$(sed -n 's/^head_fetched: //p' "$JOB/job.yaml")" = "$PR_SHA" ]
     ! grep -q '^bayws build' "$STUB_LOG"
-    [ "$(bay_state)" = "ready" ]
+    [ "$(bay_state)" = "free" ]                     # nothing was built, so nothing waits for a human
+}
+
+@test "a base branch that cannot be fetched fails the checkout step" {
+    sed -i 's/^base=develop$/base=nope/' "$JOBFILE"
+    run_naust job bay-1 "$JOBFILE"
+    [ "$status" -ne 0 ]
+    [ "$(step_status 2)" = fail ]
+    for id in 3 4 5 5b 5c 6 7 8; do [ "$(step_status $id)" = skipped ]; done
+}
+
+@test "a test run that produces no reports does not pass" {
+    export WS_TEST_BROKEN=1
+    run_naust job bay-1 "$JOBFILE"
+    [ "$status" -ne 0 ]
+    [ "$(step_status 4)" = fail ]
+    [ "$(step_status 5c)" = fail ]
+    [ "$(step_status 5)" = pass ]
 }
 
 @test "a failed build skips compile-all, tests and both boots but still reports" {

@@ -84,6 +84,14 @@ lib() { run bash -c "source '$(dirname "$NAUST")/lib.sh'; $*"; }
     [[ "$output" == *"got"* ]]
 }
 
+@test "with_lock treats a lock whose age cannot be read as fresh" {
+    make_stub stat 'exit 1'
+    mkdir -p "$NAUST_DIR/state/lock"
+    printf '%s\n' 1 > "$NAUST_DIR/state/lock/pid"
+    lib 'load_config; if with_lock; then echo got; else echo busy; fi'
+    [[ "$output" == *"busy"* ]]
+}
+
 @test "json_escape handles quotes, backslashes and newlines" {
     lib "json_escape \$'a \"b\" \\\\ c\nd'"
     [ "$status" -eq 0 ]
