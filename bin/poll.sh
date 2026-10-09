@@ -19,14 +19,14 @@ seen_dir() { printf '%s/seen/%s\n' "$STATE_DIR" "${1//\//__}"; }
 
 cmd_candidates() {
   local profile="$1" repo debounce skip_drafts dir tmp open=" "
-  local number sha base author head_repo draft updated f first_seen age
+  local number sha base author head_repo draft f first_seen age
   repo="$(prof "$profile" .repo)"; [ -n "$repo" ] || die "profile $profile has no repo"
   debounce="$(prof "$profile" .poll.debounce_minutes 10)"
   skip_drafts="$(prof "$profile" .poll.skip_drafts true)"
   dir="$(seen_dir "$repo")"; mkdir -p "$dir"
   tmp="$(mktemp)"
   gh pr list --repo "$repo" --state open --limit 100 --json "$PR_FIELDS" --jq "$PR_SHAPE" > "$tmp"
-  while IFS=$'\t' read -r number sha base author head_repo draft updated; do
+  while IFS=$'\t' read -r number sha base author head_repo draft _; do
     [ -n "$number" ] || continue
     open="$open$number "
     f="$dir/$number"

@@ -128,6 +128,10 @@ make_bay() { # <name> <state>
   chmod +x "$dir/scripts/ws"
   printf 'state=%s\nprofile=terasology\njob=\nsince=%s\n' "$2" "$NAUST_NOW" > "$NAUST_DIR/state/bays/$1.state"
   make_bay_repo "$dir/components/terasology" develop
+  # Like the engine's own .gitignore: modules are independent repos inside the tree.
+  printf '/modules/\nbuild/\n/logs/\n/saves/\n/terasology-server/\n' > "$dir/components/terasology/.gitignore"
+  git -C "$dir/components/terasology" add .gitignore
+  git -C "$dir/components/terasology" commit -qm gitignore
   make_bay_repo "$dir/components/terasology/modules/Cooking" develop
   BAY_DIR="$dir"
 }
