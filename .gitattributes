@@ -1,0 +1,7 @@
+# Everything here runs in bash, on Windows as often as not, so a CRLF checkout
+# would turn every script into "command not found" on an invisible \r.
+* text=auto eol=lf
+bin/* text eol=lf
+*.sh text eol=lf
+*.bash text eol=lf
+*.bats text eol=lf
