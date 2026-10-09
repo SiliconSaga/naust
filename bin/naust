@@ -27,7 +27,7 @@ USAGE
 cmd="${1:-}"
 case "$cmd" in
   ""|-h|--help|help) usage; exit 0 ;;
-  tick|bay|run|job|report|notify)
+  tick|bay|run|job|report|notify|gate|poll|queue)
     shift
     exec bash "$HERE/$cmd.sh" "$@" ;;
   *) echo "naust: unknown command '$cmd'" >&2; usage >&2; exit 2 ;;
