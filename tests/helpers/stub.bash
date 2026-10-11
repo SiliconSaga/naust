@@ -38,6 +38,19 @@ naust_setup() {
   export NAUST_NOW=1760000000
   WORKSPACE="$NAUST_WORKSPACE"
   mkdir -p "$NAUST_DIR" "$WORKSPACE/scripts" "$WORKSPACE/bays" "$WORKSPACE/realms/realm-test/naust" "$WORKSPACE/realms/realm-test/adapters"
+  # The ws inside a bay: a recorder, except that `exec <comp> …` runs the
+  # command from the component directory the way the real verb does, so a
+  # profile command or hook reached through the bay actually runs.
+  cat > "$STUB_BIN/bayws-template" <<'EOF'
+#!/usr/bin/env bash
+echo "bayws $*" >> "$STUB_LOG"
+if [ "$1" = exec ]; then
+  cd "$(dirname "$0")/../components/$2" || exit 1
+  shift 2
+  exec "$@"
+fi
+EOF
+  chmod +x "$STUB_BIN/bayws-template"
   cat > "$WORKSPACE/scripts/ws" <<'EOF'
 #!/usr/bin/env bash
 echo "ws $*" >> "$STUB_LOG"
@@ -54,7 +67,7 @@ case "$1 $2" in
     # directory per --with component.
     dir="$NAUST_WORKSPACE/bays/$3"; shift 3
     mkdir -p "$dir/scripts" "$dir/components" "$dir/realms/realm-test"
-    printf '#!/usr/bin/env bash\necho "bayws $*" >> "$STUB_LOG"\n' > "$dir/scripts/ws"; chmod +x "$dir/scripts/ws"
+    cp "$STUB_BIN/bayws-template" "$dir/scripts/ws"
     while [ $# -gt 0 ]; do [ "$1" = --with ] && mkdir -p "$dir/components/$2"; shift; done ;;
 esac
 exit "${WS_EXIT:-0}"
@@ -126,8 +139,7 @@ make_bay_repo() { # <dir> <branch>
 make_bay() { # <name> <state>
   local dir="$NAUST_WORKSPACE/bays/$1"
   mkdir -p "$dir/scripts" "$dir/components" "$dir/realms/realm-test" "$NAUST_DIR/state/bays"
-  printf '#!/usr/bin/env bash\necho "bayws $*" >> "$STUB_LOG"\n' > "$dir/scripts/ws"
-  chmod +x "$dir/scripts/ws"
+  cp "$STUB_BIN/bayws-template" "$dir/scripts/ws"
   printf 'state=%s\nprofile=terasology\njob=\nsince=%s\n' "$2" "$NAUST_NOW" > "$NAUST_DIR/state/bays/$1.state"
   make_bay_repo "$dir/components/terasology" develop
   # Like the engine's own .gitignore: modules are independent repos inside the tree.

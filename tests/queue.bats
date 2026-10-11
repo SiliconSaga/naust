@@ -17,6 +17,33 @@ put() { run_naust queue put terasology MovingBlocks/Terasology "$@"; }
     grep -q "already queued" "$NAUST_LOG"
 }
 
+@test "put at the same head keeps the entry but takes a higher priority and new extras" {
+    NAUST_NOW=100 put 7 abc123 develop stranger stranger/Terasology
+    NAUST_NOW=200 put 7 abc123 develop stranger stranger/Terasology --priority 10 --with "terasology/modules/Health#12" --bay bay-2
+    [ "$status" -eq 0 ]
+    f="$NAUST_DIR/state/queue/MovingBlocks__Terasology__7.job"
+    grep -q '^priority=10$' "$f"
+    grep -q '^with=terasology/modules/Health#12$' "$f"
+    grep -q '^bay=bay-2$' "$f"
+    grep -q '^enqueued=100$' "$f"
+    NAUST_NOW=300 put 7 abc123 develop stranger stranger/Terasology
+    grep -q '^priority=10$' "$f"                 # a polled re-put never lowers it
+    grep -q '^with=terasology/modules/Health#12$' "$f"
+}
+
+@test "order lists every job the way next picks them; next is the first" {
+    NAUST_NOW=100 put 1 a develop x x/y
+    NAUST_NOW=200 put 2 b develop x x/y --priority 5
+    NAUST_NOW=300 put 3 c develop x x/y --priority 5
+    run_naust queue order
+    [ "$status" -eq 0 ]
+    [[ "${lines[0]}" == *"__2.job" ]]
+    [[ "${lines[1]}" == *"__3.job" ]]
+    [[ "${lines[2]}" == *"__1.job" ]]
+    run_naust queue next
+    [[ "$output" == *"__2.job" ]]
+}
+
 @test "put with a newer head replaces the entry" {
     put 7 abc123 develop stranger stranger/Terasology
     put 7 def456 develop stranger stranger/Terasology

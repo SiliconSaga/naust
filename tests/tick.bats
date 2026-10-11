@@ -9,7 +9,7 @@ setup() {
       *"--json reviews"*) printf "%s\n" "$GATE_REVIEWS" ;;
     esac'
     make_stub curl
-    printf 'NAUST_DISCORD_WEBHOOK=https://discord.invalid/hook\n' > "$NAUST_ENV_FILE"
+    printf 'NAUST_DISCORD_WEBHOOK=https://discord.invalid/hook\nNAUST_GITHUB_TOKEN=tok\n' > "$NAUST_ENV_FILE"
     export NAUST_JOB_SCRIPT="$BATS_TEST_TMPDIR/job-stub.sh"
     printf '#!/usr/bin/env bash\necho "job $*" >> "$STUB_LOG"\n' > "$NAUST_JOB_SCRIPT"
 }
@@ -63,6 +63,18 @@ $(pr_line 8 bbb222 stranger)"
     [ "$status" -eq 0 ]
     [ -f "$NAUST_DIR/state/queue/MovingBlocks__Terasology__7.job" ]
     ! grep -q '^job ' "$STUB_LOG"
+}
+
+@test "a job that cannot get its bay does not block the next job that can" {
+    make_bay bay-1 free
+    make_bay bay-2 held
+    NAUST_NOW=100 run_naust queue put terasology MovingBlocks/Terasology 7 abc1234 develop Cervator Cervator/Terasology --priority 10 --bay bay-2
+    NAUST_NOW=200 run_naust queue put terasology MovingBlocks/Terasology 8 bcd2345 develop Cervator Cervator/Terasology
+    run_naust tick
+    [ "$status" -eq 0 ]
+    grep -q "^job bay-1 $NAUST_DIR/state/jobs/MovingBlocks__Terasology-8-bcd2345.job" "$STUB_LOG"
+    [ -f "$NAUST_DIR/state/queue/MovingBlocks__Terasology__7.job" ]
+    [ ! -e "$NAUST_DIR/state/queue/MovingBlocks__Terasology__8.job" ]
 }
 
 @test "a tick that finds the lock held does nothing" {

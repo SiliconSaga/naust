@@ -17,7 +17,17 @@ pr_line() { printf '%s\t%s\t%s\t%s\t%s\t%s\t%s' "$1" "$2" develop "$3" "$3/Teras
     f="$NAUST_DIR/state/seen/MovingBlocks__Terasology/7"
     [ "$(sed -n 's/^sha=//p' "$f")" = "abc123" ]
     [ "$(sed -n 's/^first_seen=//p' "$f")" = "$NAUST_NOW" ]
-    grep -q 'gh pr list --repo MovingBlocks/Terasology --state open --limit 100 --json' "$STUB_LOG"
+    grep -q 'gh pr list --repo MovingBlocks/Terasology --state open --limit 500 --json' "$STUB_LOG"
+}
+
+@test "a list as long as the limit forgets nothing, since it may be incomplete" {
+    export POLL_PRS="$(pr_line 7 abc123 stranger)"
+    run_naust poll candidates terasology
+    export POLL_PRS="$(for n in $(seq 100 599); do pr_line "$n" "sha$n" stranger; printf '\n'; done)"
+    run_naust poll candidates terasology
+    [ "$status" -eq 0 ]
+    [ -e "$NAUST_DIR/state/seen/MovingBlocks__Terasology/7" ]
+    grep -q "not forgetting" "$NAUST_LOG"
 }
 
 @test "after the debounce it is a candidate once, until marked queued" {

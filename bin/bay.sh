@@ -40,11 +40,18 @@ bay_env() { # <name>
   export GRADLE_USER_HOME="$GRADLE_HOME"
 }
 
-# Run a profile command or hook in the component dir; empty means skip.
+# Run a profile command or hook in the component dir, through the bay's own
+# ws exec like every other step, so it sees the bay's environment and never
+# this process's. Empty means skip. A failure marks the bay broken: a bay
+# whose warm-up or hook died is not one a job may use, and set -e would
+# otherwise exit before anything recorded that.
 bay_run_in_comp() { # <label> <command>
   [ -n "$2" ] || return 0
   log "$1: $2"
-  (cd "$NAUST_COMP_DIR" && bash -c "$2")
+  if ! bay_ws "$NAUST_BAY_NAME" exec "$(basename "$NAUST_COMP_DIR")" bash -c "$2"; then
+    bay_set_state "$NAUST_BAY_NAME" broken
+    die "$1 failed in $NAUST_BAY_NAME; bay marked broken"
+  fi
 }
 
 cmd_repos() {
@@ -117,7 +124,10 @@ cmd_add() {
   printf 'state=provisioning\nprofile=%s\njob=\nsince=%s\n' "$profile" "$(now)" > "$(bay_state_file "$name")"
   bay_env "$name"
   log "add $name: warming the Gradle cache"
-  bay_ws "$name" build "$comp"
+  if ! bay_ws "$name" build "$comp"; then
+    bay_set_state "$name" broken
+    die "add $name: ws build $comp failed; bay marked broken"
+  fi
   bay_run_in_comp "compile_all" "$(prof "$profile" .steps.compile_all)"
   bay_run_in_comp "after_add" "$(prof "$profile" .hooks.after_add)"
   cmd_reset "$name"

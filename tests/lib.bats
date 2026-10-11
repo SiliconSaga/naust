@@ -92,6 +92,25 @@ lib() { run bash -c "source '$(dirname "$NAUST")/lib.sh'; $*"; }
     [[ "$output" == *"busy"* ]]
 }
 
+@test "with_lock releases only a lock it still owns" {
+    lib 'load_config; with_lock; printf 4242 > "$STATE_DIR/lock/pid"'
+    [ "$status" -eq 0 ]
+    [ -d "$NAUST_DIR/state/lock" ]             # another tick reclaimed and took it; not ours to remove
+    rm -rf "$NAUST_DIR/state/lock"
+    lib 'load_config; with_lock'
+    [ ! -e "$NAUST_DIR/state/lock" ]
+}
+
+@test "gh_auth fails without the machine token rather than borrowing another account's" {
+    lib 'gh_auth'
+    [ "$status" -ne 0 ]
+    grep -q "NAUST_GITHUB_TOKEN" "$NAUST_LOG"
+    printf 'NAUST_GITHUB_TOKEN=tok\n' > "$NAUST_ENV_FILE"
+    lib 'gh_auth; echo "$GH_TOKEN"'
+    [ "$status" -eq 0 ]
+    [ "$output" = "tok" ]
+}
+
 @test "json_escape handles quotes, backslashes and newlines" {
     lib "json_escape \$'a \"b\" \\\\ c\nd'"
     [ "$status" -eq 0 ]

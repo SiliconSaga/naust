@@ -33,6 +33,9 @@ cmd_decide() {
   fi
   phrase="$(trust "$profile" .nod_phrase 'ok to test')"
   lphrase="$(printf '%s' "$phrase" | tr '[:upper:]' '[:lower:]')"
+  # The phrase sits inside a jq string literal (gh's --jq takes no --arg), so
+  # its backslashes and quotes are escaped for jq; nothing else is special there.
+  lphrase="${lphrase//\\/\\\\}"; lphrase="${lphrase//\"/\\\"}"
   reviews="$(gh pr view "$number" --repo "$repo" --json reviews \
       --jq ".reviews[] | [.author.login, .state, (.commit.oid // \"\"), (((.body // \"\") | ascii_downcase | contains(\"$lphrase\")) | tostring)] | @tsv" 2>/dev/null || true)"
   while IFS=$'\t' read -r login state oid has_phrase; do

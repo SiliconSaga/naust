@@ -90,11 +90,14 @@ env_value() {
 }
 
 # Give this process the machine account's token for its own gh calls. Only the
-# tick and naust run call it; job.sh unsets GH_TOKEN before PR code runs.
+# tick and naust run call it; job.sh unsets GH_TOKEN before PR code runs. No
+# token is an error, not a fallback: gh would otherwise use whatever token or
+# stored login the environment carries, and naust posts as nobody but the
+# machine account.
 gh_auth() {
   local t; t="$(env_value NAUST_GITHUB_TOKEN)"
-  [ -n "$t" ] && export GH_TOKEN="$t"
-  return 0
+  [ -n "$t" ] || die "NAUST_GITHUB_TOKEN is not set in $NAUST_ENV_FILE; naust never borrows another account's token"
+  export GH_TOKEN="$t"
 }
 
 # key=value state files. Keys are [A-Za-z0-9_], values are single lines.
@@ -104,7 +107,7 @@ kv_get() { # <file> <key>
 }
 kv_set() { # <file> <key> <value>
   local file="$1" key="$2" value="$3" tmp
-  tmp="$(mktemp)"
+  tmp="$(mktemp "$file.XXXXXX")"          # beside its destination, so the mv is a rename and a reader never sees half a file
   { [ -f "$file" ] && grep -v "^$key=" "$file" || true; printf '%s=%s\n' "$key" "$value"; } > "$tmp"
   mv "$tmp" "$file"
 }
@@ -121,24 +124,34 @@ file_mtime() { # <path>
 # that died without cleaning up and is reclaimed; a job never runs that long. A
 # lock whose age cannot be read is treated as fresh: two jobs on one host is
 # the worse failure.
+#
+# Reclaiming renames the stale directory away before removing it, so of two
+# ticks that both find it stale only the one whose rename succeeds removes
+# anything, and neither can remove a lock the other has just made. Releasing
+# checks the pid first for the same reason.
 with_lock() {
-  local lock="$STATE_DIR/lock" age mtime
+  local lock="$STATE_DIR/lock" age mtime stale
   if ! mkdir "$lock" 2>/dev/null; then
     if ! mtime="$(file_mtime "$lock")"; then
       log "cannot read the age of $lock; treating it as held"
       return 1
     fi
     age=$(( $(now) - mtime ))
-    if [ "$age" -gt $(( LOCK_STALE_HOURS * 3600 )) ]; then
-      log "reclaiming a lock $age s old (pid $(cat "$lock/pid" 2>/dev/null || echo '?'))"
-      rm -rf "$lock"
-      mkdir "$lock" 2>/dev/null || return 1
-    else
-      return 1
+    [ "$age" -gt $(( LOCK_STALE_HOURS * 3600 )) ] || return 1
+    stale="$lock.stale.$$"
+    if mv "$lock" "$stale" 2>/dev/null; then
+      log "reclaiming a lock $age s old (pid $(cat "$stale/pid" 2>/dev/null || echo '?'))"
+      rm -rf "$stale"
     fi
+    mkdir "$lock" 2>/dev/null || return 1
   fi
   printf '%s\n' "$$" > "$lock/pid"
-  trap 'rm -rf "$STATE_DIR/lock"' EXIT
+  trap 'release_lock' EXIT
+  return 0
+}
+release_lock() {
+  local lock="$STATE_DIR/lock"
+  [ "$(cat "$lock/pid" 2>/dev/null)" = "$$" ] && rm -rf "$lock"
   return 0
 }
 

@@ -10,7 +10,8 @@ setup() {
     printf 'NAUST_DISCORD_WEBHOOK=https://discord.invalid/hook\n' > "$NAUST_ENV_FILE"
     run_naust notify say 'PR #7 by @x needs a "nod"'
     [ "$status" -eq 0 ]
-    grep -q -- '-F payload_json={"content":"PR #7 by @x needs a \\"nod\\""} https://discord.invalid/hook' "$STUB_LOG"
+    # --form-string: curl would otherwise read `;type=` inside the text as a form option
+    grep -q -- '--form-string payload_json={"content":"PR #7 by @x needs a \\"nod\\""} https://discord.invalid/hook' "$STUB_LOG"
 }
 
 @test "say attaches a file when asked" {

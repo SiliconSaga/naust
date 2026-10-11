@@ -5,6 +5,7 @@ load helpers/stub
 # `--json reviews`, so that case comes first.
 setup() {
     naust_setup
+    printf 'NAUST_GITHUB_TOKEN=tok\n' > "$NAUST_ENV_FILE"
     export GATE_REVIEWS=""
     make_stub gh 'case "$*" in
       *"--json reviews"*) printf "%s\n" "$GATE_REVIEWS" ;;

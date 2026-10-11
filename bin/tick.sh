@@ -35,18 +35,23 @@ while IFS= read -r profile; do
   done < <(bash "$HERE/poll.sh" candidates "$profile")
 done < <(cfg_list .profiles)
 
-job="$(bash "$HERE/queue.sh" next)" || { log "tick: queue empty"; exit 0; }
-profile="$(kv_get "$job" profile)"
-repo="$(kv_get "$job" repo)"; number="$(kv_get "$job" number)"; head="$(kv_get "$job" head)"
-jobid="${repo//\//__}-$number-${head:0:7}"
-bay="$(kv_get "$job" bay)"
-if [ -z "$bay" ]; then
-  bay="$(bash "$HERE/bay.sh" free-for "$profile")" || { log "tick: no free bay for $profile; $repo#$number stays queued"; exit 0; }
-fi
-if ! bash "$HERE/bay.sh" claim "$bay" "$jobid"; then
+# The first job in queue order that can have a bay runs; one that cannot (its
+# pinned bay is held, or its profile has no free bay) stays queued and does
+# not hold the ones behind it.
+job=""
+while IFS= read -r cand; do
+  [ -n "$cand" ] || continue
+  profile="$(kv_get "$cand" profile)"
+  repo="$(kv_get "$cand" repo)"; number="$(kv_get "$cand" number)"; head="$(kv_get "$cand" head)"
+  jobid="${repo//\//__}-$number-${head:0:7}"
+  bay="$(kv_get "$cand" bay)"
+  if [ -z "$bay" ]; then
+    bay="$(bash "$HERE/bay.sh" free-for "$profile")" || { log "tick: no free bay for $profile; $repo#$number stays queued"; continue; }
+  fi
+  if bash "$HERE/bay.sh" claim "$bay" "$jobid"; then job="$cand"; break; fi
   log "tick: bay $bay is not free; $repo#$number stays queued"
-  exit 0
-fi
+done < <(bash "$HERE/queue.sh" order)
+[ -n "$job" ] || { log "tick: nothing to run"; exit 0; }
 run="$STATE_DIR/jobs/$jobid.job"
 mv "$job" "$run"
 log "tick: running $jobid in $bay"

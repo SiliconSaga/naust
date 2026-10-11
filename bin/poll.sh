@@ -13,22 +13,24 @@ load_config
 require_tool gh
 
 PR_FIELDS='number,headRefOid,baseRefName,author,headRepositoryOwner,headRepository,isDraft,updatedAt'
+PR_LIMIT=500   # a list this long may be cut off, and a cut-off list must not read as "the rest closed"
 PR_SHAPE='.[] | [.number, .headRefOid, .baseRefName, .author.login, ((.headRepositoryOwner.login // "") + "/" + (.headRepository.name // "")), (.isDraft|tostring), .updatedAt] | @tsv'
 
 seen_dir() { printf '%s/seen/%s\n' "$STATE_DIR" "${1//\//__}"; }
 
 cmd_candidates() {
-  local profile="$1" repo debounce skip_drafts dir tmp open=" "
+  local profile="$1" repo debounce skip_drafts dir tmp open=" " count=0
   local number sha base author head_repo draft f first_seen age
   repo="$(prof "$profile" .repo)"; [ -n "$repo" ] || die "profile $profile has no repo"
   debounce="$(prof "$profile" .poll.debounce_minutes 10)"
   skip_drafts="$(prof "$profile" .poll.skip_drafts true)"
   dir="$(seen_dir "$repo")"; mkdir -p "$dir"
   tmp="$(mktemp)"
-  gh pr list --repo "$repo" --state open --limit 100 --json "$PR_FIELDS" --jq "$PR_SHAPE" > "$tmp"
+  gh pr list --repo "$repo" --state open --limit "$PR_LIMIT" --json "$PR_FIELDS" --jq "$PR_SHAPE" > "$tmp"
   while IFS=$'\t' read -r number sha base author head_repo draft _; do
     [ -n "$number" ] || continue
     open="$open$number "
+    count=$((count + 1))
     f="$dir/$number"
     if [ "$(kv_get "$f" sha)" != "$sha" ]; then
       kv_set "$f" sha "$sha"
@@ -48,6 +50,10 @@ cmd_candidates() {
     printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$profile" "$repo" "$number" "$sha" "$base" "$author" "$head_repo"
   done < "$tmp"
   rm -f "$tmp"
+  if [ "$count" -ge "$PR_LIMIT" ]; then
+    log "poll: $repo has $count open PRs, the most one poll reads; not forgetting any"
+    return 0
+  fi
   for f in "$dir"/*; do
     [ -f "$f" ] || continue
     number="$(basename "$f")"

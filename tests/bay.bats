@@ -16,10 +16,16 @@ state_of() { sed -n 's/^state=//p' "$NAUST_DIR/state/bays/$1.state"; }
     [ "$status" -eq 0 ]
     [ "$(sed -n 1p "$STUB_LOG")" = "ws bay add bay-1 --with terasology --realm realm-test" ]
     grep -q '^bayws build terasology$' "$STUB_LOG"
+    # Profile commands and hooks reach the component through the bay's own
+    # ws exec, never a bash -c in naust's process.
+    grep -q '^bayws exec terasology bash -c compile-all-stub$' "$STUB_LOG"
     grep -q '^compile-all-stub' "$STUB_LOG"
+    grep -q '^bayws exec terasology bash -c after-add-stub$' "$STUB_LOG"
     grep -q '^after-add-stub' "$STUB_LOG"
     grep -q '^ws bay reset bay-1$' "$STUB_LOG"
+    grep -q '^bayws exec terasology bash -c after-reset-stub$' "$STUB_LOG"
     grep -q '^after-reset-stub' "$STUB_LOG"
+    ! grep -q '^bash -c' "$STUB_LOG"
     [ "$(state_of bay-1)" = "free" ]
     [ "$(sed -n 's/^profile=//p' "$NAUST_DIR/state/bays/bay-1.state")" = "terasology" ]
 }
@@ -50,7 +56,23 @@ state_of() { sed -n 's/^state=//p' "$NAUST_DIR/state/bays/$1.state"; }
     grep -q '^after-reset-stub' "$STUB_LOG"
     [ "$(state_of bay-1)" = "free" ]
     run_naust bay reset bay-1
+    [ "$status" -eq 0 ]
     [ ! -e "$BAY_DIR/.outputs/naust/current" ]
+}
+
+@test "a failing hook marks the bay broken instead of leaving it as it was" {
+    make_bay bay-1 ready
+    make_stub after-reset-stub 'exit 3'
+    run_naust bay reset bay-1
+    [ "$status" -ne 0 ]
+    [ "$(state_of bay-1)" = "broken" ]
+    grep -q "after_reset failed" "$NAUST_LOG"
+    make_stub after-reset-stub
+    make_stub compile-all-stub 'exit 3'
+    run_naust bay add bay-2 --profile terasology
+    [ "$status" -ne 0 ]
+    [ "$(state_of bay-2)" = "broken" ]
+    ! grep -q '^after-add-stub' "$STUB_LOG"
 }
 
 @test "a failed ws bay reset marks the bay broken and skips the hook" {

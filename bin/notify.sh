@@ -32,9 +32,10 @@ cmd_say() {
   payload="{\"content\":\"$(json_escape "$text")\"}"
   if [ -n "$file" ]; then
     [ -f "$file" ] || die "notify say: no such file $file"
-    curl -fsS --connect-timeout 5 --max-time 60 -F "payload_json=$payload" -F "file=@$file" "$hook" >/dev/null
+    # --form-string: with -F, curl would read a `;type=` or `;filename=` inside the text as a form option
+    curl -fsS --connect-timeout 5 --max-time 60 --form-string "payload_json=$payload" -F "file=@$file" "$hook" >/dev/null
   else
-    curl -fsS --connect-timeout 5 --max-time 30 -F "payload_json=$payload" "$hook" >/dev/null
+    curl -fsS --connect-timeout 5 --max-time 30 --form-string "payload_json=$payload" "$hook" >/dev/null
   fi
 }
 

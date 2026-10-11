@@ -14,9 +14,11 @@ case "$1 $2" in
     [ "$3" = --cr ] || exit 1
     git -C "$comp" fetch -q origin "refs/pull/$4/head" && git -C "$comp" switch -q -C "cr/$4" FETCH_HEAD ;;
   "checkout terasology/modules/Cooking") ;;
+  "exec terasology") shift 2; cd "$comp" && exec "$@" ;;
   "build terasology") echo "build GH_TOKEN=${GH_TOKEN:-unset}" >> "$STUB_LOG"; exit "${WS_BUILD_EXIT:-0}" ;;
   "test terasology")
     [ -z "${WS_TEST_BROKEN:-}" ] || exit 1              # a run that produced nothing
+    [ -z "${WS_TEST_DROP_CR:-}" ] || git -C "$comp" branch -q -D cr/7 2>/dev/null   # the branch to return to is gone
     mkdir -p "$comp/engine-tests/build/test-results/unitTest"
     printf '<testsuite name="%s" tests="1" failures="0" errors="0" skipped="0"><testcase name="t" classname="%s"/></testsuite>\n' "${3:-all}" "${3:-all}" \
       > "$comp/engine-tests/build/test-results/unitTest/TEST-${3:-all}.xml" ;;
@@ -98,6 +100,9 @@ bay_state() { sed -n 's/^state=//p' "$NAUST_DIR/state/bays/bay-1.state"; }
     grep -q '^compile-all-stub' "$STUB_LOG"
     grep -q '^headless-stub' "$STUB_LOG"
     grep -q '^smoke-stub' "$STUB_LOG"
+    # the profile's commands run through the bay's own ws exec, like every other step
+    grep -q '^ws bay exec bay-1 exec terasology bash -c headless-stub$' "$STUB_LOG"
+    grep -q '^ws bay exec bay-1 exec terasology bash -c smoke-stub$' "$STUB_LOG"
     grep -q '^bayws review terasology checks 7' "$STUB_LOG"
     grep -q "^bayws review terasology comment 7 .outputs/naust/MovingBlocks__Terasology-7-${PR_SHA:0:7}/comment.md" "$STUB_LOG"
     grep -q "^report render $JOB" "$STUB_LOG"
@@ -144,6 +149,17 @@ bay_state() { sed -n 's/^state=//p' "$NAUST_DIR/state/bays/bay-1.state"; }
     [ "$(step_status 4)" = fail ]
     [ "$(step_status 5c)" = fail ]
     [ "$(step_status 5)" = pass ]
+}
+
+@test "a baseline that cannot return to the PR branch skips everything that would test the base instead" {
+    export WS_TEST_DROP_CR=1
+    run_naust job bay-1 "$JOBFILE"
+    [ "$status" -ne 0 ]
+    [ "$(step_status 4)" = fail ]
+    for id in 5 5b 5c 6 7 8; do [ "$(step_status $id)" = skipped ]; done
+    [ "$(step_status 9)" = pass ]
+    grep -q 'cannot return to cr/7' "$JOB/baseline.log"
+    ! grep -q '^bayws build' "$STUB_LOG"
 }
 
 @test "a failed build skips compile-all, tests and both boots but still reports" {

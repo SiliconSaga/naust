@@ -60,3 +60,10 @@ $(review someoneelse COMMENTED abc1234abc true)"
     decide stranger stranger/Terasology abc1234abc
     grep -q 'gh pr view 7 --repo MovingBlocks/Terasology --json reviews' "$STUB_LOG"
 }
+
+@test "a nod phrase with a quote or a backslash reaches jq escaped" {
+    yq -i '.terasology.nod_phrase = "say \"go\" \\ now"' "$NAUST_WORKSPACE/realms/realm-test/naust/trust.yaml"
+    decide stranger stranger/Terasology abc1234abc
+    [ "$status" -eq 0 ]
+    grep -qF 'contains("say \"go\" \\ now")' "$STUB_LOG"
+}

@@ -34,6 +34,7 @@ export NAUST_JOB_DIR="$JOB" NAUST_PR_NUMBER="$number" NAUST_PR_HEAD="$head"
 
 FAILED=0
 HEAD_MOVED=0
+BASELINE_LOST=0   # the tree could not come back from the merge base; nothing after may run
 record() { printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" >> "$STEPS"; }
 skip() { record "$1" "$2" skipped 0; }
 skip_all() { local s; for s in "$@"; do skip "${s%% *}" "${s#* }"; done; }   # "<id> <name>" pairs
@@ -47,10 +48,13 @@ run_step() {
   [ "$status" = pass ]
 }
 in_bay() { bay_ws "$BAY" "$@"; }
-profile_cmd() { # <profile key>: run the command in the component dir; empty is a pass
+# A profile command runs in the component dir through the bay's own ws exec,
+# like every other step, so it sees the bay's environment and never this
+# process's. Empty is a pass.
+profile_cmd() { # <profile key>
   local c; c="$(prof "$NAUST_PROFILE" "$1")"
   [ -n "$c" ] || { echo "(no $1 in profile)"; return 0; }
-  (cd "$NAUST_COMP_DIR" && bash -c "$c")
+  in_bay exec "$COMP" bash -c "$c"
 }
 
 # The remote the base branch lives on: the adapter's provision.remote, else
@@ -152,7 +156,7 @@ step_baseline() {
   local rc=0
   git -C "$NAUST_COMP_DIR" switch -q --detach "$MERGE_BASE" || return 1
   run_scope "$JOB/baseline" || rc=1
-  git -C "$NAUST_COMP_DIR" switch -q "cr/$number" || rc=1
+  git -C "$NAUST_COMP_DIR" switch -q "cr/$number" || { echo "cannot return to cr/$number; the tree is on the merge base"; BASELINE_LOST=1; return 1; }
   return "$rc"
 }
 step_build() { in_bay build "$COMP"; }
@@ -206,7 +210,9 @@ if run_step 1 reset step_reset; then
   if run_step 2 checkout step_checkout; then
     run_step 3 scope step_scope || true
     run_step 4 baseline step_baseline || true
-    if run_step 5 build step_build; then
+    if [ "$BASELINE_LOST" -eq 1 ]; then
+      skip_all "5 build" "5b compile-all" "5c tests" "6 headless" "7 smoke" "8 tree"   # every one would be judging the base
+    elif run_step 5 build step_build; then
       run_step 5b compile-all step_compile_all || true
       run_step 5c tests step_tests || true
       run_step 6 headless step_headless || true
@@ -214,7 +220,7 @@ if run_step 1 reset step_reset; then
     else
       skip 5b compile-all; skip 5c tests; skip 6 headless; skip 7 smoke
     fi
-    run_step 8 tree step_tree || true
+    [ "$BASELINE_LOST" -eq 1 ] || run_step 8 tree step_tree || true
   else
     skip_all "3 scope" "4 baseline" "5 build" "5b compile-all" "5c tests" "6 headless" "7 smoke" "8 tree"
   fi
