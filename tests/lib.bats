@@ -92,6 +92,16 @@ lib() { run bash -c "source '$(dirname "$NAUST")/lib.sh'; $*"; }
     [[ "$output" == *"busy"* ]]
 }
 
+@test "with_lock never reclaims a stale-looking lock whose tick is still running" {
+    mkdir -p "$NAUST_DIR/state/lock"
+    printf '%s\n' "$$" > "$NAUST_DIR/state/lock/pid"       # this very process: alive
+    touch -d '@1759970000' "$NAUST_DIR/state/lock"
+    lib 'load_config; if with_lock; then echo got; else echo busy; fi'
+    [[ "$output" == *"busy"* ]]
+    grep -q "still running" "$NAUST_LOG"
+    [ -f "$NAUST_DIR/state/lock/pid" ]
+}
+
 @test "with_lock releases only a lock it still owns" {
     lib 'load_config; with_lock; printf 4242 > "$STATE_DIR/lock/pid"'
     [ "$status" -eq 0 ]

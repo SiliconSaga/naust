@@ -130,7 +130,7 @@ file_mtime() { # <path>
 # anything, and neither can remove a lock the other has just made. Releasing
 # checks the pid first for the same reason.
 with_lock() {
-  local lock="$STATE_DIR/lock" age mtime stale
+  local lock="$STATE_DIR/lock" age mtime stale owner
   if ! mkdir "$lock" 2>/dev/null; then
     if ! mtime="$(file_mtime "$lock")"; then
       log "cannot read the age of $lock; treating it as held"
@@ -138,6 +138,13 @@ with_lock() {
     fi
     age=$(( $(now) - mtime ))
     [ "$age" -gt $(( LOCK_STALE_HOURS * 3600 )) ] || return 1
+    # Old is not the same as dead: a job past the stale age with its tick
+    # still running keeps the lock, or a second job would start beside it.
+    owner="$(cat "$lock/pid" 2>/dev/null || true)"
+    case "$owner" in
+      ''|*[!0-9]*) ;;
+      *) if kill -0 "$owner" 2>/dev/null; then log "lock is $age s old but its tick (pid $owner) is still running; leaving it"; return 1; fi ;;
+    esac
     stale="$lock.stale.$$"
     if mv "$lock" "$stale" 2>/dev/null; then
       log "reclaiming a lock $age s old (pid $(cat "$stale/pid" 2>/dev/null || echo '?'))"

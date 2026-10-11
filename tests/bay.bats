@@ -67,11 +67,14 @@ state_of() { sed -n 's/^state=//p' "$NAUST_DIR/state/bays/$1.state"; }
     [ "$status" -ne 0 ]
     [ "$(state_of bay-1)" = "broken" ]
     grep -q "after_reset failed" "$NAUST_LOG"
-    make_stub after-reset-stub
+}
+
+@test "a failing compile-all during add marks the bay broken and skips after_add" {
     make_stub compile-all-stub 'exit 3'
     run_naust bay add bay-2 --profile terasology
     [ "$status" -ne 0 ]
     [ "$(state_of bay-2)" = "broken" ]
+    grep -q "compile_all failed" "$NAUST_LOG"
     ! grep -q '^after-add-stub' "$STUB_LOG"
 }
 
