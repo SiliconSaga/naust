@@ -13,9 +13,13 @@ NAUST_ENV_FILE="${NAUST_ENV_FILE:-$NAUST_WORKSPACE/.env}"
 
 # Log lines go to stderr, or to NAUST_LOG when set (the tests set it, so a
 # script's stdout stays an exact contract and the log is grepped on its own).
+# With a bay in scope (bay_env sets NAUST_BAY_LOG) every line also lands in
+# that bay's log, the one `ws bay log <name>` tails, so whoever watches the
+# bay sees naust's steps in order with everything ws bay wrote there.
 log() {
   local line; line="$(printf '%s naust: %s' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*")"
   if [ -n "${NAUST_LOG:-}" ]; then printf '%s\n' "$line" >> "$NAUST_LOG"; else printf '%s\n' "$line" >&2; fi
+  if [ -n "${NAUST_BAY_LOG:-}" ] && [ -d "${NAUST_BAY_LOG%/*}" ]; then printf '%s\n' "$line" >> "$NAUST_BAY_LOG" 2>/dev/null || true; fi
 }
 die() { log "ERROR: $*"; [ -n "${NAUST_LOG:-}" ] && printf 'naust: ERROR: %s\n' "$*" >&2; exit 1; }
 # Overridable so tests get a fixed clock.

@@ -38,17 +38,22 @@ bay_env() { # <name>
   export NAUST_COMP_DIR="$dir/components/$comp"
   export NAUST_REALM_DIR="$dir/realms/$REALM"
   export GRADLE_USER_HOME="$GRADLE_HOME"
+  # The bay's log, shared with ws bay: naust's lines and the output of its
+  # long steps go there, and `ws bay log <name> --follow` shows them.
+  mkdir -p "$dir/.outputs"
+  export NAUST_BAY_LOG="$dir/.outputs/bay.log"
 }
 
 # Run a profile command or hook in the component dir, through the bay's own
 # ws exec like every other step, so it sees the bay's environment and never
-# this process's. Empty means skip. A failure marks the bay broken: a bay
-# whose warm-up or hook died is not one a job may use, and set -e would
-# otherwise exit before anything recorded that.
+# this process's. Empty means skip. Its output goes to the bay log, not the
+# console: these are the steps that run for minutes. A failure marks the
+# bay broken: a bay whose warm-up or hook died is not one a job may use,
+# and set -e would otherwise exit before anything recorded that.
 bay_run_in_comp() { # <label> <command>
   [ -n "$2" ] || return 0
-  log "$1: $2"
-  if ! bay_ws "$NAUST_BAY_NAME" exec "$(basename "$NAUST_COMP_DIR")" bash -c "$2"; then
+  log "$1: $2 (follow with: ws bay log $NAUST_BAY_NAME --follow)"
+  if ! bay_ws "$NAUST_BAY_NAME" exec "$(basename "$NAUST_COMP_DIR")" bash -c "$2" >> "$NAUST_BAY_LOG" 2>&1; then
     bay_set_state "$NAUST_BAY_NAME" broken
     die "$1 failed in $NAUST_BAY_NAME; bay marked broken"
   fi
@@ -70,7 +75,7 @@ cmd_repos() {
 cmd_env() {
   bay_require "$1"; bay_env "$1"
   local v
-  for v in NAUST_BAY_DIR NAUST_BAY_NAME NAUST_PROFILE NAUST_COMP_DIR NAUST_REALM_DIR GRADLE_USER_HOME; do
+  for v in NAUST_BAY_DIR NAUST_BAY_NAME NAUST_PROFILE NAUST_COMP_DIR NAUST_REALM_DIR NAUST_BAY_LOG GRADLE_USER_HOME; do
     printf 'export %s=%q\n' "$v" "${!v}"
   done
 }
@@ -128,8 +133,8 @@ cmd_add() {
     die "add $name: ws bay add failed; bay marked broken"
   fi
   bay_env "$name"
-  log "add $name: warming the Gradle cache"
-  if ! bay_ws "$name" build "$comp"; then
+  log "add $name: warming the Gradle cache (follow with: ws bay log $name --follow)"
+  if ! bay_ws "$name" build "$comp" >> "$NAUST_BAY_LOG" 2>&1; then
     bay_set_state "$name" broken
     die "add $name: ws build $comp failed; bay marked broken"
   fi
@@ -138,14 +143,23 @@ cmd_add() {
   cmd_reset "$name"
 }
 
+# name, state, profile, job, seconds in that state, seconds since the bay's
+# log was last written (- with no log yet): the last column tells a working
+# bay from a stuck one without opening the log.
 cmd_list() {
-  local f name state profile job since
+  local f name state profile job since logf mtime activity
   for f in "$STATE_DIR"/bays/*.state; do
     [ -f "$f" ] || continue
     name="$(basename "$f" .state)"
     state="$(kv_get "$f" state)"; profile="$(kv_get "$f" profile)"
     job="$(kv_get "$f" job)"; since="$(kv_get "$f" since)"
-    printf '%s\t%s\t%s\t%s\t%s\n' "$name" "$state" "$profile" "$job" "$(( $(now) - ${since:-$(now)} ))"
+    activity="-"
+    logf="$(bay_dir "$name")/.outputs/bay.log"
+    if [ -f "$logf" ] && mtime="$(file_mtime "$logf")"; then
+      activity=$(( $(now) - mtime ))
+      [ "$activity" -ge 0 ] || activity=0
+    fi
+    printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$name" "$state" "$profile" "$job" "$(( $(now) - ${since:-$(now)} ))" "$activity"
   done
 }
 

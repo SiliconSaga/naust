@@ -143,13 +143,24 @@ EOF
     [ "$status" -ne 0 ]
 }
 
-@test "list prints every bay with state, profile, job and age" {
+@test "list prints every bay with state, profile, job, age and last activity" {
     make_bay bay-1 free
     make_bay bay-2 busy
     run_naust bay list
     [ "$status" -eq 0 ]
-    [[ "${lines[0]}" == bay-1$'\t'free$'\t'terasology$'\t'$'\t'0 ]]
+    [[ "${lines[0]}" == bay-1$'\t'free$'\t'terasology$'\t'$'\t'0$'\t'- ]]
     [[ "${lines[1]}" == bay-2$'\t'busy* ]]
+}
+
+@test "add sends the warm-up and the hooks to the bay log and the list shows activity" {
+    make_stub compile-all-stub 'echo warming-up'
+    run_naust bay add bay-1 --profile terasology
+    [ "$status" -eq 0 ]
+    grep -q 'warming-up' "$NAUST_WORKSPACE/bays/bay-1/.outputs/bay.log"
+    grep -q 'naust: compile_all:' "$NAUST_WORKSPACE/bays/bay-1/.outputs/bay.log"
+    [[ "$output" != *"warming-up"* ]]
+    run_naust bay list
+    [[ "${lines[0]}" =~ ^bay-1$'\t'free$'\t'terasology$'\t'$'\t'[0-9]+$'\t'[0-9]+$ ]]
 }
 
 @test "repos lists the component and the nested repos the adapter declares" {
