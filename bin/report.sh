@@ -51,7 +51,7 @@ cmd_render() {
       fail) human="$human- $name failed; see \`$name.log\`."$'\n' ;;
     esac
   done < "$job/steps.tsv"
-  human="${human//- smoke failed; see \`smoke.log\`./- smoke boot failed: the game did not reach the renderer, or the screenshot is missing; read \`smoke.log\`.}"
+  human="${human//- launch failed; see \`launch.log\`./- launch check failed: the game did not reach the renderer, or the screenshot is missing; read \`launch.log\`.}"
   human="${human//- reset failed; see \`reset.log\`./- reset failed: the bay is marked broken and nothing ran; read \`reset.log\`.}"
   human="${human//- tree failed; see \`tree.log\`./- the working tree is not clean after the run; see the clean-tree section.}"
   if grep -q '^head moved' "$job/checkout.log" 2>/dev/null; then
@@ -90,7 +90,7 @@ cmd_render() {
     done <<< "$new_fail"
   fi
 
-  local tree_section="" smoke_section="" checks_line
+  local tree_section="" launch_section="" checks_line
   if [ -s "$job/tree.txt" ]; then
     tree_section="$(awk -F'\t' '{ printf "- %s: `%s` (%s)\n", $1, $2, $3 }' "$job/tree.txt")"
     if grep -q 'unexpected$' "$job/tree.txt"; then
@@ -99,8 +99,8 @@ cmd_render() {
   else
     tree_section="clean"
   fi
-  if [ -f "$job/screenshot.png" ]; then smoke_section="screenshot: \`screenshot.png\` (attached on Discord; in the bay at \`$job/screenshot.png\`)"
-  else smoke_section="no screenshot; last lines of \`smoke.log\`:"$'\n\n```\n'"$(tail -n 5 "$job/smoke.log" 2>/dev/null || true)"$'\n```'; fi
+  if [ -f "$job/screenshot.png" ]; then launch_section="screenshot: \`screenshot.png\` (attached on Discord; in the bay at \`$job/screenshot.png\`)"
+  else launch_section="no screenshot; last lines of \`launch.log\`:"$'\n\n```\n'"$(tail -n 5 "$job/launch.log" 2>/dev/null || true)"$'\n```'; fi
   checks_line="$(grep -m1 '^Checks:' "$job/checks.txt" 2>/dev/null || echo 'Checks: not read')"
   human="$human- Run the game and play the change; the boots only prove it starts."$'\n'
 
@@ -122,7 +122,7 @@ $tests_section
 ## Boots
 
 - headless: $(awk -F'\t' '$2 == "headless" { print $3 }' "$job/steps.tsv")
-- smoke: $(awk -F'\t' '$2 == "smoke" { print $3 }' "$job/steps.tsv"); $smoke_section
+- launch: $(awk -F'\t' '$2 == "launch" { print $3 }' "$job/steps.tsv"); $launch_section
 
 ## Clean tree
 

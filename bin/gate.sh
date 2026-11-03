@@ -5,7 +5,7 @@
 #
 # Prints "run<TAB>reason" or "nod<TAB>reason". A nod is a review, because
 # GitHub records the commit every review was submitted against: an approval
-# or an "ok to test" from a maintainer admits that commit and no other. A
+# or a "haul it in" from a maintainer admits that commit and no other. A
 # label cannot say which commit it meant, so labels are never read.
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -31,7 +31,7 @@ cmd_decide() {
   if printf '%s\n' "$trusted" | has_line_ci "$head_repo"; then
     printf 'run\thead repository %s is trusted\n' "$head_repo"; return 0
   fi
-  phrase="$(trust "$profile" .nod_phrase 'ok to test')"
+  phrase="$(trust "$profile" .nod_phrase 'haul it in')"
   lphrase="$(printf '%s' "$phrase" | tr '[:upper:]' '[:lower:]')"
   # The phrase sits inside a jq string literal (gh's --jq takes no --arg), so
   # its backslashes and quotes are escaped for jq; nothing else is special there.

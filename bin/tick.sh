@@ -27,7 +27,7 @@ while IFS= read -r profile; do
     else
       seen="$STATE_DIR/seen/${repo//\//__}/$number"
       if [ "$(kv_get "$seen" notified)" != "$sha" ]; then
-        bash "$HERE/notify.sh" say "PR #$number on $repo by @$author at ${sha:0:7} needs a nod before a bay runs it: a maintainer's Approve, or a review saying \"$(trust "$p" .nod_phrase 'ok to test')\". https://github.com/$repo/pull/$number ($reason)" || true
+        bash "$HERE/notify.sh" say "PR #$number on $repo by @$author at ${sha:0:7} needs a nod before a bay runs it: a maintainer's Approve, or a review saying \"$(trust "$p" .nod_phrase 'haul it in')\". https://github.com/$repo/pull/$number ($reason)" || true
         bash "$HERE/poll.sh" mark "$p" "$number" notified "$sha"
       fi
       log "tick: $repo#$number waiting ($reason)"

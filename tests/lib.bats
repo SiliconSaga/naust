@@ -8,7 +8,7 @@ lib() { run bash -c "source '$(dirname "$NAUST")/lib.sh'; $*"; }
 @test "naust --help lists the commands" {
     run_naust --help
     [ "$status" -eq 0 ]
-    [[ "$output" == *"tick"*"bay"*"run"* ]]
+    [[ "$output" == *"tick"*"bay"*"dock"* ]]
 }
 
 @test "load_config finds the workspace, the realm and the state under bays/.naust" {
@@ -42,7 +42,7 @@ lib() { run bash -c "source '$(dirname "$NAUST")/lib.sh'; $*"; }
     [ "$status" -eq 0 ]
     [ "${lines[0]}" = "MovingBlocks/Terasology" ]
     [ "${lines[1]}" = "fallback" ]
-    [ "${lines[2]}" = "ok to test" ]
+    [ "${lines[2]}" = "haul it in" ]
     [ "${lines[3]}" = "groovyw-stub module init omega" ]
     [ "${lines[4]}" = "logs" ]
     [ "${lines[6]}" = "terasology-server" ]

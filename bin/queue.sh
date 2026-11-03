@@ -26,7 +26,7 @@ cmd_put() {
   f="$(job_path "$repo" "$number")"
   if [ -f "$f" ] && [ "$(kv_get "$f" head)" = "$head" ]; then
     # The same head again: keep its place in the queue, but an operator's
-    # `naust run` on top of a polled entry must not be lost. Priority only
+    # `naust dock` on top of a polled entry must not be lost. Priority only
     # rises; a named target or bay replaces an absent one.
     local changed=""
     if [ "$priority" -gt "$(kv_get "$f" priority)" ]; then kv_set "$f" priority "$priority"; changed="$changed priority=$priority"; fi

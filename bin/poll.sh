@@ -69,7 +69,7 @@ cmd_mark() {
   local profile="$1" number="$2" key="$3" sha="$4" repo
   repo="$(prof "$profile" .repo)"
   case "$key" in queued|notified) ;; *) die "poll mark: key must be queued or notified" ;; esac
-  mkdir -p "$(seen_dir "$repo")"          # naust run marks a PR no poll has seen yet
+  mkdir -p "$(seen_dir "$repo")"          # naust dock marks a PR no poll has seen yet
   kv_set "$(seen_dir "$repo")/$number" "$key" "$sha"
 }
 

@@ -94,7 +94,7 @@ env_value() {
 }
 
 # Give this process the machine account's token for its own gh calls. Only the
-# tick and naust run call it; job.sh unsets GH_TOKEN before PR code runs. No
+# tick and naust dock call it; job.sh unsets GH_TOKEN before PR code runs. No
 # token is an error, not a fallback: gh would otherwise use whatever token or
 # stored login the environment carries, and naust posts as nobody but the
 # machine account.

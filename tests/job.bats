@@ -59,7 +59,7 @@ setup() {
     make_stub compile-all-stub
     make_stub after-reset-stub
     make_stub headless-stub 'printf "Server started\n" > "$NAUST_JOB_DIR/headless.log"'
-    make_stub smoke-stub 'touch "$NAUST_JOB_DIR/screenshot.png"; echo "smoke GH_TOKEN=${GH_TOKEN:-unset}" >> "$STUB_LOG"'
+    make_stub launch-stub 'touch "$NAUST_JOB_DIR/screenshot.png"; echo "launch GH_TOKEN=${GH_TOKEN:-unset}" >> "$STUB_LOG"'
     make_stub curl
     printf 'NAUST_DISCORD_WEBHOOK=https://discord.invalid/hook\nNAUST_GITHUB_TOKEN=tok\n' > "$NAUST_ENV_FILE"
     export GH_TOKEN=leaked-from-the-tick             # what a real tick's environment carries into the job
@@ -99,10 +99,10 @@ bay_state() { sed -n 's/^state=//p' "$NAUST_DIR/state/bays/bay-1.state"; }
     grep -q '^bayws build terasology' "$STUB_LOG"
     grep -q '^compile-all-stub' "$STUB_LOG"
     grep -q '^headless-stub' "$STUB_LOG"
-    grep -q '^smoke-stub' "$STUB_LOG"
+    grep -q '^launch-stub' "$STUB_LOG"
     # the profile's commands run through the bay's own ws exec, like every other step
     grep -q '^ws bay exec bay-1 exec terasology bash -c headless-stub$' "$STUB_LOG"
-    grep -q '^ws bay exec bay-1 exec terasology bash -c smoke-stub$' "$STUB_LOG"
+    grep -q '^ws bay exec bay-1 exec terasology bash -c launch-stub$' "$STUB_LOG"
     grep -q '^bayws review terasology checks 7' "$STUB_LOG"
     grep -q "^bayws review terasology comment 7 .outputs/naust/MovingBlocks__Terasology-7-${PR_SHA:0:7}/comment.md" "$STUB_LOG"
     grep -q "^report render $JOB" "$STUB_LOG"
@@ -113,7 +113,7 @@ bay_state() { sed -n 's/^state=//p' "$NAUST_DIR/state/bays/bay-1.state"; }
     # the machine account's token reaches the report's review calls and nothing the PR controls:
     # only those two calls ask ws bay exec to pass GH_TOKEN through its .env scrub
     grep -q '^build GH_TOKEN=unset$' "$STUB_LOG"
-    grep -q '^smoke GH_TOKEN=unset$' "$STUB_LOG"
+    grep -q '^launch GH_TOKEN=unset$' "$STUB_LOG"
     [ "$(grep -c '^review GH_TOKEN=tok$' "$STUB_LOG")" -eq 2 ]
     [ "$(grep -c '^ws bay exec --pass GH_TOKEN bay-1 review terasology' "$STUB_LOG")" -eq 2 ]
     grep -q '^ws bay exec bay-1 build terasology$' "$STUB_LOG"
@@ -200,7 +200,7 @@ bay_state() { sed -n 's/^state=//p' "$NAUST_DIR/state/bays/bay-1.state"; }
 @test "known dirt from the adapter is named as known, anything else as unexpected" {
     mkdir -p "$BAY_DIR/components/terasology/modules/Cooking/src/test/resources"
     touch "$BAY_DIR/components/terasology/modules/Cooking/src/test/resources/logback-test.xml"
-    make_stub smoke-stub 'touch "$NAUST_JOB_DIR/screenshot.png"; touch "$NAUST_COMP_DIR/stray.dll"'
+    make_stub launch-stub 'touch "$NAUST_JOB_DIR/screenshot.png"; touch "$NAUST_COMP_DIR/stray.dll"'
     run_naust job bay-1 "$JOBFILE"
     grep -q $'modules/Cooking\t?? src/test/resources/logback-test.xml\tknown' "$JOB/tree.txt"
     grep -q $'?? stray.dll\tunexpected' "$JOB/tree.txt"

@@ -163,7 +163,7 @@ step_build() { in_bay build "$COMP"; }
 step_compile_all() { profile_cmd .steps.compile_all; }
 step_tests() { run_scope "$JOB/reports"; }
 step_headless() { profile_cmd .steps.headless; }
-step_smoke() { profile_cmd .steps.smoke; }
+step_launch() { profile_cmd .steps.launch; }
 
 step_tree() {
   local r line known unknown=0 pat
@@ -211,21 +211,21 @@ if run_step 1 reset step_reset; then
     run_step 3 scope step_scope || true
     run_step 4 baseline step_baseline || true
     if [ "$BASELINE_LOST" -eq 1 ]; then
-      skip_all "5 build" "5b compile-all" "5c tests" "6 headless" "7 smoke" "8 tree"   # every one would be judging the base
+      skip_all "5 build" "5b compile-all" "5c tests" "6 headless" "7 launch" "8 tree"   # every one would be judging the base
     elif run_step 5 build step_build; then
       run_step 5b compile-all step_compile_all || true
       run_step 5c tests step_tests || true
       run_step 6 headless step_headless || true
-      run_step 7 smoke step_smoke || true
+      run_step 7 launch step_launch || true
     else
-      skip 5b compile-all; skip 5c tests; skip 6 headless; skip 7 smoke
+      skip 5b compile-all; skip 5c tests; skip 6 headless; skip 7 launch
     fi
     [ "$BASELINE_LOST" -eq 1 ] || run_step 8 tree step_tree || true
   else
-    skip_all "3 scope" "4 baseline" "5 build" "5b compile-all" "5c tests" "6 headless" "7 smoke" "8 tree"
+    skip_all "3 scope" "4 baseline" "5 build" "5b compile-all" "5c tests" "6 headless" "7 launch" "8 tree"
   fi
 else
-  skip_all "2 checkout" "3 scope" "4 baseline" "5 build" "5b compile-all" "5c tests" "6 headless" "7 smoke" "8 tree"
+  skip_all "2 checkout" "3 scope" "4 baseline" "5 build" "5b compile-all" "5c tests" "6 headless" "7 launch" "8 tree"
 fi
 run_step 9 report step_report || true
 # A bay with a finished job waits for a human. A broken reset keeps the bay

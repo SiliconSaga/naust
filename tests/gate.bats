@@ -42,7 +42,7 @@ review() { printf '%s\t%s\t%s\t%s' "$1" "$2" "$3" "${4:-false}"; }
 @test "the phrase in a maintainer's review counts; a dismissed review and a bare request for changes do not" {
     export GATE_REVIEWS="$(review Cervator COMMENTED abc1234abc true)"
     decide stranger stranger/Terasology abc1234abc
-    [ "$output" = $'run\t"ok to test" at abc1234 from maintainer Cervator' ]
+    [ "$output" = $'run\t"haul it in" at abc1234 from maintainer Cervator' ]
     export GATE_REVIEWS="$(review Cervator DISMISSED abc1234abc)
 $(review Cervator CHANGES_REQUESTED abc1234abc)"
     decide stranger stranger/Terasology abc1234abc

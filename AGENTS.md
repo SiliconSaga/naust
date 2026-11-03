@@ -4,4 +4,4 @@ Bash only, `set -euo pipefail`, no jq on the host (shape JSON with `gh --jq`), Y
 
 Design of record and the reasoning behind each decision: the realm's `docs/plans/2026-10-08-naust-pr-bays-design.md`. The Phase 1 plan beside it lists the files and their contracts.
 
-Secrets live in the workspace's `.env`, read literally by `env_value`; never source it and never pass a token on a command line. Only `gh_auth` (the tick, `naust run`) puts the token in the environment, and `job.sh` unsets it before PR code runs.
+Secrets live in the workspace's `.env`, read literally by `env_value`; never source it and never pass a token on a command line. Only `gh_auth` (the tick, `naust dock`) puts the token in the environment, and `job.sh` unsets it before PR code runs.

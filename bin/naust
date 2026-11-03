@@ -13,7 +13,7 @@ Usage: naust <command> [args]
   bay reset <name> [--deep]    reset a bay to base; --deep also drops Gradle outputs
   bay list                     every bay with its state
   bay release <name>           hand a ready or held bay back to the pool
-  run <profile> <n> [--with <target>#<n>]... [--bay <name>]
+  dock <profile> <n> [--with <target>#<n>]... [--bay <name>]
                                queue a PR by hand, ahead of polled ones
   report render <jobdir>       re-render a job's report.md and comment.md
   notify say <text> [--file <path>]
@@ -27,7 +27,7 @@ USAGE
 cmd="${1:-}"
 case "$cmd" in
   ""|-h|--help|help) usage; exit 0 ;;
-  tick|bay|run|job|report|notify|gate|poll|queue)
+  tick|bay|dock|job|report|notify|gate|poll|queue)
     shift
     exec bash "$HERE/$cmd.sh" "$@" ;;
   *) echo "naust: unknown command '$cmd'" >&2; usage >&2; exit 2 ;;

@@ -90,7 +90,7 @@ bay:
 steps:
   compile_all: "compile-all-stub"
   headless: "headless-stub"
-  smoke: "smoke-stub"
+  launch: "launch-stub"
 hooks:
   after_add: "after-add-stub"
   after_reset: "after-reset-stub"
@@ -101,7 +101,7 @@ YAML
 terasology:
   maintainers: [Cervator, jdrueckert]
   trusted: [SiliconSaga/Terasology, trustedbot]
-  nod_phrase: "ok to test"
+  nod_phrase: "haul it in"
 YAML
   cat > "$WORKSPACE/realms/realm-test/adapters/terasology.yaml" <<'YAML'
 commands:
