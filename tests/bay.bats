@@ -30,6 +30,31 @@ state_of() { sed -n 's/^state=//p' "$NAUST_DIR/state/bays/$1.state"; }
     [ "$(sed -n 's/^profile=//p' "$NAUST_DIR/state/bays/bay-1.state")" = "terasology" ]
 }
 
+@test "add records the bay as provisioning before ws bay add starts cloning" {
+    cat > "$NAUST_WORKSPACE/scripts/ws" <<'EOF'
+#!/usr/bin/env bash
+echo "ws $*" >> "$STUB_LOG"
+case "$1 $2" in
+  "bay add")
+    echo "state-during-add=$(sed -n 's/^state=//p' "$NAUST_DIR/state/bays/$3.state" 2>/dev/null)" >> "$STUB_LOG"
+    dir="$NAUST_WORKSPACE/bays/$3"; mkdir -p "$dir/scripts" "$dir/components/terasology" "$dir/realms/realm-test"; cp "$STUB_BIN/bayws-template" "$dir/scripts/ws" ;;
+  "bay exec") shift 2; bay="$1"; shift; cd "$NAUST_WORKSPACE/bays/$bay" && exec bash scripts/ws "$@" ;;
+esac
+exit 0
+EOF
+    run_naust bay add bay-1 --profile terasology
+    [ "$status" -eq 0 ]
+    grep -q '^state-during-add=provisioning$' "$STUB_LOG"
+}
+
+@test "a failed ws bay add marks the bay broken instead of leaving no state" {
+    export WS_EXIT=1
+    run_naust bay add bay-1 --profile terasology
+    [ "$status" -ne 0 ]
+    [ "$(state_of bay-1)" = "broken" ]
+    grep -q "ws bay add failed" "$NAUST_LOG"
+}
+
 @test "add passes workspace_repo through as --from" {
     printf 'profiles: [terasology]\nworkspace_repo: https://example.invalid/ygg.git\n' > "$NAUST_CONFIG"
     run_naust bay add bay-1 --profile terasology

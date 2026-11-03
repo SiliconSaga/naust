@@ -119,9 +119,14 @@ cmd_add() {
   comp="$(prof "$profile" .component)"
   [ -n "$comp" ] || die "profile $profile has no component"
   from="$(cfg .workspace_repo)"
-  log "add $name: ws bay add --with $comp --realm $REALM${from:+ --from $from}"
-  bash "$WS" bay add "$name" --with "$comp" --realm "$REALM" ${from:+--from "$from"}
+  # The state file first, so `naust bay list` names a bay from the second
+  # its clone starts rather than after the tens of minutes it takes.
   printf 'state=provisioning\nprofile=%s\njob=\nsince=%s\n' "$profile" "$(now)" > "$(bay_state_file "$name")"
+  log "add $name: ws bay add --with $comp --realm $REALM${from:+ --from $from}"
+  if ! bash "$WS" bay add "$name" --with "$comp" --realm "$REALM" ${from:+--from "$from"}; then
+    bay_set_state "$name" broken
+    die "add $name: ws bay add failed; bay marked broken"
+  fi
   bay_env "$name"
   log "add $name: warming the Gradle cache"
   if ! bay_ws "$name" build "$comp"; then
