@@ -120,6 +120,16 @@ bay_state() { sed -n 's/^state=//p' "$NAUST_DIR/state/bays/bay-1.state"; }
     ! grep -q 'leaked-from-the-tick' "$STUB_LOG"
 }
 
+@test "a step the profile does not define is recorded as skipped, never as passed" {
+    yq -i 'del(.steps.launch)' "$NAUST_WORKSPACE/realms/realm-test/naust/terasology.yaml"
+    run_naust job bay-1 "$JOBFILE"
+    [ "$status" -eq 0 ]
+    [ "$(step_status 7)" = skipped ]
+    [ "$(step_status 6)" = pass ]
+    grep -q 'no .steps.launch in profile' "$JOB/launch.log"
+    ! grep -q '^launch-stub' "$STUB_LOG"
+}
+
 @test "a PR that moved after the gate stops at checkout, says so, and frees the bay" {
     publish_bay_pr                                  # moves refs/pull/7/head past the gated head
     run_naust job bay-1 "$JOBFILE"

@@ -29,7 +29,7 @@ STEPS="$JOB/steps.tsv"
 # the report step hands it back to its two ws review calls only.
 unset GH_TOKEN
 token="$(env_value NAUST_GITHUB_TOKEN)"
-with_token() { if [ -n "$token" ]; then GH_TOKEN="$token" "$@"; else "$@"; fi; }
+with_token() { if [ -n "$token" ]; then GH_TOKEN="$token" NAUST_PASS_GH_TOKEN=1 "$@"; else "$@"; fi; }
 export NAUST_JOB_DIR="$JOB" NAUST_PR_NUMBER="$number" NAUST_PR_HEAD="$head"
 
 FAILED=0
@@ -39,21 +39,27 @@ record() { printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" >> "$STEPS"; }
 skip() { record "$1" "$2" skipped 0; }
 skip_all() { local s; for s in "$@"; do skip "${s%% *}" "${s#* }"; done; }   # "<id> <name>" pairs
 # run_step <id> <name> <function>: the function's output goes to <name>.log.
+# A function that returns STEP_SKIPPED had nothing to run; the step is recorded
+# as skipped, never as passed, and does not fail the job.
+STEP_SKIPPED=75
 run_step() {
-  local id="$1" name="$2" fn="$3" t0 status=pass
+  local id="$1" name="$2" fn="$3" t0 status=pass rc=0
   t0="$(now)"
   log "step $id $name"
-  if "$fn" >> "$JOB/$name.log" 2>&1; then :; else status=fail; FAILED=1; fi
+  "$fn" >> "$JOB/$name.log" 2>&1 || rc=$?
+  case "$rc" in 0) ;; "$STEP_SKIPPED") status=skipped ;; *) status=fail; FAILED=1 ;; esac
   record "$id" "$name" "$status" "$(( $(now) - t0 ))"
-  [ "$status" = pass ]
+  [ "$status" != fail ]
 }
 in_bay() { bay_ws "$BAY" "$@"; }
 # A profile command runs in the component dir through the bay's own ws exec,
 # like every other step, so it sees the bay's environment and never this
-# process's. Empty is a pass.
+# process's. A key the profile does not define skips the step: a realm that
+# names its steps differently from this naust must show as a gap in the
+# report, not as a check that passed without running.
 profile_cmd() { # <profile key>
   local c; c="$(prof "$NAUST_PROFILE" "$1")"
-  [ -n "$c" ] || { echo "(no $1 in profile)"; return 0; }
+  [ -n "$c" ] || { echo "no $1 in profile; step skipped"; return "$STEP_SKIPPED"; }
   in_bay exec "$COMP" bash -c "$c"
 }
 
