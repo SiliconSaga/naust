@@ -130,6 +130,13 @@ bay_state() { sed -n 's/^state=//p' "$NAUST_DIR/state/bays/bay-1.state"; }
     ! grep -q '^launch-stub' "$STUB_LOG"
 }
 
+@test "a step whose command exits 75 has failed; only a key the profile lacks skips" {
+    make_stub launch-stub 'exit 75'
+    run_naust job bay-1 "$JOBFILE"
+    [ "$(step_status 7)" = fail ]
+    [ "$(step_status 6)" = pass ]
+}
+
 @test "a PR that moved after the gate stops at checkout, says so, and frees the bay" {
     publish_bay_pr                                  # moves refs/pull/7/head past the gated head
     run_naust job bay-1 "$JOBFILE"

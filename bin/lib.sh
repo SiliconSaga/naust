@@ -71,22 +71,29 @@ load_config() {
   STATE_DIR="$NAUST_DIR/state"
   GRADLE_HOME="$NAUST_DIR/gradle-home"
   LOCK_STALE_HOURS="$(cfg .lock_stale_hours 6)"
-  # Checked here, since with_lock does arithmetic on it under set -u and a
-  # word there would end the tick without the lock ever being taken.
-  [[ "$LOCK_STALE_HOURS" =~ ^[0-9]+$ ]] || die "lock_stale_hours must be a whole number of hours, not '$LOCK_STALE_HOURS' ($NAUST_CONFIG)"
+  # Checked here, since with_lock does arithmetic on it under set -u: a word
+  # would end the tick without the lock ever being taken, a leading zero
+  # would read as octal, and a long enough number would overflow the seconds.
+  [[ "$LOCK_STALE_HOURS" =~ ^[0-9]{1,6}$ ]] || die "lock_stale_hours must be a whole number of hours, up to six digits, not '$LOCK_STALE_HOURS' ($NAUST_CONFIG)"
+  LOCK_STALE_HOURS=$((10#$LOCK_STALE_HOURS))
   mkdir -p "$STATE_DIR/queue" "$STATE_DIR/seen" "$STATE_DIR/jobs" "$STATE_DIR/bays" "$GRADLE_HOME"
   export WORKSPACE WS REALM REALM_DIR PROFILE_DIR ADAPTER_DIR BAYS_DIR STATE_DIR GRADLE_HOME LOCK_STALE_HOURS
 }
 
 # Everything that runs inside a bay goes through the parent's `ws bay exec`,
 # which runs the bay's own ws from the bay with this workspace's roots and
-# every key its .env defines unset. GH_TOKEN goes through that scrub only when
-# the caller asks by setting NAUST_PASS_GH_TOKEN for the one call: job.sh does
-# so for its two review calls alone. A token merely inherited from the shell
-# or the tick is never forwarded, so nothing the PR controls ever sees one.
+# every key its .env defines unset. That scrub knows only the .env's keys, so
+# a GH_TOKEN merely inherited from the shell or the tick is dropped here,
+# before ws is reached, and nothing the PR controls ever sees one. It goes
+# through only when the caller asks by setting NAUST_PASS_GH_TOKEN for the
+# one call: job.sh does so for its two review calls alone.
 bay_ws() { # <bay> <ws-args...>
   local bay="$1"; shift
-  bash "$WS" bay exec ${NAUST_PASS_GH_TOKEN:+--pass GH_TOKEN} "$bay" "$@"
+  if [ -n "${NAUST_PASS_GH_TOKEN:-}" ]; then
+    bash "$WS" bay exec --pass GH_TOKEN "$bay" "$@"
+  else
+    env -u GH_TOKEN bash "$WS" bay exec "$bay" "$@"
+  fi
 }
 
 # Read one value out of the workspace's .env, literally: the optional `export `

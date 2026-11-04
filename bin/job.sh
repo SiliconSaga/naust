@@ -39,15 +39,18 @@ record() { printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" >> "$STEPS"; }
 skip() { record "$1" "$2" skipped 0; }
 skip_all() { local s; for s in "$@"; do skip "${s%% *}" "${s#* }"; done; }   # "<id> <name>" pairs
 # run_step <id> <name> <function>: the function's output goes to <name>.log.
-# A function that returns STEP_SKIPPED had nothing to run; the step is recorded
-# as skipped, never as passed, and does not fail the job.
-STEP_SKIPPED=75
+# A function that had nothing to run says so by raising STEP_SKIPPED; the step
+# is recorded as skipped, never as passed, and does not fail the job. Only
+# the flag skips: an exit status belongs to the command, and a build that
+# happens to exit 75 has failed like any other.
+STEP_SKIPPED=0
 run_step() {
   local id="$1" name="$2" fn="$3" t0 status=pass rc=0
   t0="$(now)"
   log "step $id $name"
+  STEP_SKIPPED=0
   "$fn" >> "$JOB/$name.log" 2>&1 || rc=$?
-  case "$rc" in 0) ;; "$STEP_SKIPPED") status=skipped ;; *) status=fail; FAILED=1 ;; esac
+  if [ "$STEP_SKIPPED" -eq 1 ]; then status=skipped; elif [ "$rc" -ne 0 ]; then status=fail; FAILED=1; fi
   record "$id" "$name" "$status" "$(( $(now) - t0 ))"
   [ "$status" != fail ]
 }
@@ -59,7 +62,7 @@ in_bay() { bay_ws "$BAY" "$@"; }
 # report, not as a check that passed without running.
 profile_cmd() { # <profile key>
   local c; c="$(prof "$NAUST_PROFILE" "$1")"
-  [ -n "$c" ] || { echo "no $1 in profile; step skipped"; return "$STEP_SKIPPED"; }
+  [ -n "$c" ] || { echo "no $1 in profile; step skipped"; STEP_SKIPPED=1; return 0; }
   in_bay exec "$COMP" bash -c "$c"
 }
 

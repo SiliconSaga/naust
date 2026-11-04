@@ -63,11 +63,14 @@ lib() { run bash -c "source '$(dirname "$NAUST")/lib.sh'; $*"; }
 }
 
 @test "bay_ws never passes an inherited GH_TOKEN; only a caller that asks for it does" {
+    # The parent's scrub only unsets what the bay's .env defines, so the
+    # token must be gone from the environment before ws is even reached.
+    printf '#!/usr/bin/env bash\necho "ws GH_TOKEN=${GH_TOKEN:-unset} $*" >> "$STUB_LOG"\n' > "$NAUST_WORKSPACE/scripts/ws"
     export GH_TOKEN=inherited-from-the-shell
     lib 'load_config; bay_ws bay-9 build terasology; NAUST_PASS_GH_TOKEN=1 bay_ws bay-9 review terasology comment 7'
     [ "$status" -eq 0 ]
-    grep -q '^ws bay exec bay-9 build terasology$' "$STUB_LOG"
-    grep -q '^ws bay exec --pass GH_TOKEN bay-9 review terasology comment 7$' "$STUB_LOG"
+    grep -q '^ws GH_TOKEN=unset bay exec bay-9 build terasology$' "$STUB_LOG"
+    grep -q '^ws GH_TOKEN=inherited-from-the-shell bay exec --pass GH_TOKEN bay-9 review terasology comment 7$' "$STUB_LOG"
 }
 
 @test "a config yq cannot parse is an error, not an empty config" {
@@ -80,6 +83,17 @@ lib() { run bash -c "source '$(dirname "$NAUST")/lib.sh'; $*"; }
 
 @test "lock_stale_hours must be a whole number of hours" {
     printf 'realm: realm-test\nprofiles: []\nlock_stale_hours: six\n' > "$NAUST_CONFIG"
+    lib 'load_config'
+    [ "$status" -ne 0 ]
+    grep -q "lock_stale_hours" "$NAUST_LOG"
+}
+
+@test "lock_stale_hours reads a leading zero as decimal and refuses a number that would overflow the seconds" {
+    printf 'realm: realm-test\nprofiles: []\nlock_stale_hours: "08"\n' > "$NAUST_CONFIG"
+    lib 'load_config; echo "$LOCK_STALE_HOURS"'
+    [ "$status" -eq 0 ]
+    [ "$output" = "8" ]
+    printf 'realm: realm-test\nprofiles: []\nlock_stale_hours: 99999999999999999999\n' > "$NAUST_CONFIG"
     lib 'load_config'
     [ "$status" -ne 0 ]
     grep -q "lock_stale_hours" "$NAUST_LOG"
