@@ -1,0 +1,8 @@
+# Copy to bays/.naust/naust.yaml in the workspace naust is cloned into.
+# Machine-local; never committed. Secrets go in the workspace's .env:
+#   NAUST_GITHUB_TOKEN=github_pat_...   the machine account; pull-requests: write on the watched repo
+#   NAUST_DISCORD_WEBHOOK=https://discord.com/api/webhooks/...
+# realm: realm-siliconsaga              # defaults to the workspace's active realm
+# workspace_repo: https://github.com/SiliconSaga/yggdrasil.git   # what ws bay add clones, when this checkout has several remotes
+profiles: [terasology]
+lock_stale_hours: 6
