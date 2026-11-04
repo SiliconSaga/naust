@@ -86,13 +86,14 @@ load_config() {
 # a GH_TOKEN merely inherited from the shell or the tick is dropped here,
 # before ws is reached, and nothing the PR controls ever sees one. It goes
 # through only when the caller asks by setting NAUST_PASS_GH_TOKEN for the
-# one call: job.sh does so for its two review calls alone.
+# one call: job.sh does so for its two review calls alone. GITHUB_TOKEN, which
+# gh reads just the same, is never passed and always dropped.
 bay_ws() { # <bay> <ws-args...>
   local bay="$1"; shift
   if [ -n "${NAUST_PASS_GH_TOKEN:-}" ]; then
-    bash "$WS" bay exec --pass GH_TOKEN "$bay" "$@"
+    env -u GITHUB_TOKEN bash "$WS" bay exec --pass GH_TOKEN "$bay" "$@"
   else
-    env -u GH_TOKEN bash "$WS" bay exec "$bay" "$@"
+    env -u GH_TOKEN -u GITHUB_TOKEN bash "$WS" bay exec "$bay" "$@"
   fi
 }
 

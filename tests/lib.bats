@@ -65,12 +65,14 @@ lib() { run bash -c "source '$(dirname "$NAUST")/lib.sh'; $*"; }
 @test "bay_ws never passes an inherited GH_TOKEN; only a caller that asks for it does" {
     # The parent's scrub only unsets what the bay's .env defines, so the
     # token must be gone from the environment before ws is even reached.
-    printf '#!/usr/bin/env bash\necho "ws GH_TOKEN=${GH_TOKEN:-unset} $*" >> "$STUB_LOG"\n' > "$NAUST_WORKSPACE/scripts/ws"
-    export GH_TOKEN=inherited-from-the-shell
+    # gh reads GITHUB_TOKEN as well as GH_TOKEN, so the alias goes too, on
+    # every call: only GH_TOKEN is ever passed on purpose.
+    printf '#!/usr/bin/env bash\necho "ws GH_TOKEN=${GH_TOKEN:-unset} GITHUB_TOKEN=${GITHUB_TOKEN:-unset} $*" >> "$STUB_LOG"\n' > "$NAUST_WORKSPACE/scripts/ws"
+    export GH_TOKEN=inherited-from-the-shell GITHUB_TOKEN=alias-from-the-shell
     lib 'load_config; bay_ws bay-9 build terasology; NAUST_PASS_GH_TOKEN=1 bay_ws bay-9 review terasology comment 7'
     [ "$status" -eq 0 ]
-    grep -q '^ws GH_TOKEN=unset bay exec bay-9 build terasology$' "$STUB_LOG"
-    grep -q '^ws GH_TOKEN=inherited-from-the-shell bay exec --pass GH_TOKEN bay-9 review terasology comment 7$' "$STUB_LOG"
+    grep -q '^ws GH_TOKEN=unset GITHUB_TOKEN=unset bay exec bay-9 build terasology$' "$STUB_LOG"
+    grep -q '^ws GH_TOKEN=inherited-from-the-shell GITHUB_TOKEN=unset bay exec --pass GH_TOKEN bay-9 review terasology comment 7$' "$STUB_LOG"
 }
 
 @test "a config yq cannot parse is an error, not an empty config" {
