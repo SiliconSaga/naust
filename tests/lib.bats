@@ -62,6 +62,29 @@ lib() { run bash -c "source '$(dirname "$NAUST")/lib.sh'; $*"; }
     grep -q '^ws bay exec bay-9 build terasology$' "$STUB_LOG"
 }
 
+@test "bay_ws never passes an inherited GH_TOKEN; only a caller that asks for it does" {
+    export GH_TOKEN=inherited-from-the-shell
+    lib 'load_config; bay_ws bay-9 build terasology; NAUST_PASS_GH_TOKEN=1 bay_ws bay-9 review terasology comment 7'
+    [ "$status" -eq 0 ]
+    grep -q '^ws bay exec bay-9 build terasology$' "$STUB_LOG"
+    grep -q '^ws bay exec --pass GH_TOKEN bay-9 review terasology comment 7$' "$STUB_LOG"
+}
+
+@test "a config yq cannot parse is an error, not an empty config" {
+    printf 'realm: realm-test\nprofiles: [\n' > "$NAUST_CONFIG"
+    lib 'load_config; cfg_list .profiles; echo reached'
+    [ "$status" -ne 0 ]
+    [[ "$output" != *"reached"* ]]
+    grep -q "naust.yaml" "$NAUST_LOG"
+}
+
+@test "lock_stale_hours must be a whole number of hours" {
+    printf 'realm: realm-test\nprofiles: []\nlock_stale_hours: six\n' > "$NAUST_CONFIG"
+    lib 'load_config'
+    [ "$status" -ne 0 ]
+    grep -q "lock_stale_hours" "$NAUST_LOG"
+}
+
 @test "kv_set and kv_get round-trip and overwrite" {
     f="$BATS_TEST_TMPDIR/kv"
     lib "kv_set '$f' state free; kv_set '$f' job none; kv_set '$f' state busy; kv_get '$f' state; kv_get '$f' job; kv_get '$f' absent"
@@ -125,4 +148,10 @@ lib() { run bash -c "source '$(dirname "$NAUST")/lib.sh'; $*"; }
     lib "json_escape \$'a \"b\" \\\\ c\nd'"
     [ "$status" -eq 0 ]
     [ "$output" = 'a \"b\" \\ c\nd' ]
+}
+
+@test "json_escape escapes every control character, not only the named ones" {
+    lib "json_escape \$'a\x01b\x0cc\x1fd'"
+    [ "$status" -eq 0 ]
+    [ "$output" = 'a\u0001b\u000cc\u001fd' ]
 }

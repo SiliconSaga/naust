@@ -29,15 +29,20 @@ require_tool() { command -v "$1" >/dev/null 2>&1 || die "'$1' is required but no
 # One scalar from a YAML file, with a default when absent or null. Not
 # `path // default`: yq treats a YAML false as missing under //, and
 # `skip_drafts: false` must read back as false.
+#
+# A file yq cannot read is an error, never a default: a malformed naust.yaml
+# read as "no profiles" would make a tick poll nothing and say nothing.
 _yq_scalar() { # <file> <path> [default]
   local v=""
-  [ -f "$1" ] && { v="$(yq "$2" "$1" 2>/dev/null)" || v=""; }
+  if [ -f "$1" ]; then
+    v="$(yq "$2" "$1" 2>&1)" || die "cannot read $2 from $1: $v"
+  fi
   if [ -z "$v" ] || [ "$v" = "null" ]; then printf '%s\n' "${3:-}"; else printf '%s\n' "$v"; fi
 }
 # A YAML list, one item per line (empty when absent).
 _yq_list() { # <file> <path>
   [ -f "$1" ] || return 0
-  yq "($2 // [])[]" "$1" 2>/dev/null || true
+  yq "($2 // [])[]" "$1" || die "cannot read $2 from $1"
 }
 
 cfg() { _yq_scalar "$NAUST_CONFIG" "$1" "${2:-}"; }
@@ -66,18 +71,22 @@ load_config() {
   STATE_DIR="$NAUST_DIR/state"
   GRADLE_HOME="$NAUST_DIR/gradle-home"
   LOCK_STALE_HOURS="$(cfg .lock_stale_hours 6)"
+  # Checked here, since with_lock does arithmetic on it under set -u and a
+  # word there would end the tick without the lock ever being taken.
+  [[ "$LOCK_STALE_HOURS" =~ ^[0-9]+$ ]] || die "lock_stale_hours must be a whole number of hours, not '$LOCK_STALE_HOURS' ($NAUST_CONFIG)"
   mkdir -p "$STATE_DIR/queue" "$STATE_DIR/seen" "$STATE_DIR/jobs" "$STATE_DIR/bays" "$GRADLE_HOME"
   export WORKSPACE WS REALM REALM_DIR PROFILE_DIR ADAPTER_DIR BAYS_DIR STATE_DIR GRADLE_HOME LOCK_STALE_HOURS
 }
 
 # Everything that runs inside a bay goes through the parent's `ws bay exec`,
 # which runs the bay's own ws from the bay with this workspace's roots and
-# every key its .env defines unset. GH_TOKEN is passed through only when the
-# caller set it on purpose: job.sh unsets it first thing and sets it for the
-# two review calls alone, so nothing the PR controls ever sees a token.
+# every key its .env defines unset. GH_TOKEN goes through that scrub only when
+# the caller asks by setting NAUST_PASS_GH_TOKEN for the one call: job.sh does
+# so for its two review calls alone. A token merely inherited from the shell
+# or the tick is never forwarded, so nothing the PR controls ever sees one.
 bay_ws() { # <bay> <ws-args...>
   local bay="$1"; shift
-  bash "$WS" bay exec ${GH_TOKEN:+--pass GH_TOKEN} "$bay" "$@"
+  bash "$WS" bay exec ${NAUST_PASS_GH_TOKEN:+--pass GH_TOKEN} "$bay" "$@"
 }
 
 # Read one value out of the workspace's .env, literally: the optional `export `
@@ -166,14 +175,21 @@ release_lock() {
   return 0
 }
 
-# Escape a string for use inside a JSON string literal. Enough for the Discord
-# payload and the comment body: backslash, quote, newline, tab, carriage return.
+# Escape a string for use inside a JSON string literal: backslash, quote, the
+# named controls, and every other control character as \u00XX, since a stray
+# one from a log tail would otherwise make the whole payload invalid JSON.
+# No subshells: printf -v builds each character. A bash string cannot hold NUL.
 json_escape() {
-  local s="$1"
+  local s="$1" i hex c
   s="${s//\\/\\\\}"
   s="${s//\"/\\\"}"
   s="${s//$'\n'/\\n}"
   s="${s//$'\t'/\\t}"
   s="${s//$'\r'/\\r}"
+  for i in 1 2 3 4 5 6 7 8 11 12 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31; do
+    printf -v hex '%02x' "$i"
+    printf -v c '%b' "\\x$hex"
+    s="${s//"$c"/\\u00$hex}"
+  done
   printf '%s' "$s"
 }
