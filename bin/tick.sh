@@ -26,9 +26,14 @@ while IFS= read -r profile; do
       log "tick: $repo#$number queued ($reason)"
     else
       seen="$STATE_DIR/seen/${repo//\//__}/$number"
+      # Marked notified only once the notice went out, so a webhook that was
+      # down is tried again next tick rather than the PR waiting unheard.
       if [ "$(kv_get "$seen" notified)" != "$sha" ]; then
-        bash "$HERE/notify.sh" say "PR #$number on $repo by @$author at ${sha:0:7} needs a nod before a bay runs it: a maintainer's Approve, or a review saying \"$(trust "$p" .nod_phrase 'haul it in')\". https://github.com/$repo/pull/$number ($reason)" || true
-        bash "$HERE/poll.sh" mark "$p" "$number" notified "$sha"
+        if bash "$HERE/notify.sh" say "PR #$number on $repo by @$author at ${sha:0:7} needs a nod before a bay runs it: a maintainer's Approve, or a review saying \"$(trust "$p" .nod_phrase 'haul it in')\". https://github.com/$repo/pull/$number ($reason)"; then
+          bash "$HERE/poll.sh" mark "$p" "$number" notified "$sha"
+        else
+          log "tick: the notice for $repo#$number did not go out; trying again next tick"
+        fi
       fi
       log "tick: $repo#$number waiting ($reason)"
     fi
@@ -47,6 +52,14 @@ while IFS= read -r cand; do
   bay="$(kv_get "$cand" bay)"
   if [ -z "$bay" ]; then
     bay="$(bash "$HERE/bay.sh" free-for "$profile")" || { log "tick: no free bay for $profile; $repo#$number stays queued"; continue; }
+  else
+    # A pinned bay is run as its own profile's, so a bay of another profile
+    # would run the PR against the wrong component and commands.
+    bay_profile="$(bash "$HERE/bay.sh" list | awk -F'\t' -v b="$bay" '$1 == b { print $3 }')"
+    if [ "$bay_profile" != "$profile" ]; then
+      log "tick: bay $bay belongs to ${bay_profile:-no profile}, not $profile; $repo#$number stays queued"
+      continue
+    fi
   fi
   if bash "$HERE/bay.sh" claim "$bay" "$jobid"; then job="$cand"; break; fi
   log "tick: bay $bay is not free; $repo#$number stays queued"

@@ -65,6 +65,36 @@ $(pr_line 8 bbb222 stranger)"
     ! grep -q '^job ' "$STUB_LOG"
 }
 
+@test "a job pinned to a bay of another profile stays queued rather than running there" {
+    make_bay bay-1 free
+    make_bay bay-2 free
+    sed -i 's/^profile=.*/profile=other/' "$NAUST_DIR/state/bays/bay-2.state"
+    run_naust queue put terasology MovingBlocks/Terasology 7 abc1234 develop Cervator Cervator/Terasology --bay bay-2
+    run_naust tick
+    [ "$status" -eq 0 ]
+    grep -q "bay bay-2 belongs to other, not terasology" "$NAUST_LOG"
+    [ -f "$NAUST_DIR/state/queue/MovingBlocks__Terasology__7.job" ]
+    ! grep -q '^job ' "$STUB_LOG"
+    [ "$(sed -n 's/^state=//p' "$NAUST_DIR/state/bays/bay-2.state")" = "free" ]
+}
+
+@test "a notice that could not be sent is sent again next tick" {
+    mkdir -p "$NAUST_DIR/state/seen/MovingBlocks__Terasology"
+    aged 8 bbb222
+    export POLL_PRS="$(pr_line 8 bbb222 stranger)"
+    make_stub curl 'exit 7'
+    run_naust tick
+    [ "$status" -eq 0 ]
+    [ "$(grep -c '^curl ' "$STUB_LOG")" -eq 1 ]
+    [ -z "$(sed -n 's/^notified=//p' "$NAUST_DIR/state/seen/MovingBlocks__Terasology/8")" ]
+    make_stub curl
+    run_naust tick
+    [ "$(grep -c '^curl ' "$STUB_LOG")" -eq 2 ]
+    [ "$(sed -n 's/^notified=//p' "$NAUST_DIR/state/seen/MovingBlocks__Terasology/8")" = "bbb222" ]
+    run_naust tick
+    [ "$(grep -c '^curl ' "$STUB_LOG")" -eq 2 ]
+}
+
 @test "a job that cannot get its bay does not block the next job that can" {
     make_bay bay-1 free
     make_bay bay-2 held

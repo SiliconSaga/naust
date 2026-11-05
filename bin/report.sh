@@ -60,20 +60,25 @@ cmd_render() {
 
   # One read per directory, split on the first newline: piping cmd_junit into
   # head trips pipefail when head closes the pipe early.
-  local tests_section="" pr_all base_all
+  # A baseline that produced no reports (its tests did not compile, say)
+  # compares to nothing: the PR's failures are listed, attributed to nobody.
+  local tests_section="" pr_all base_all base_ran=0
   if ls "$job/reports"/*.xml >/dev/null 2>&1; then
     pr_all="$(cmd_junit "$job/reports")"
     pr_tot="${pr_all%%$'\n'*}"
     pr_fail=""; [ "$pr_all" = "$pr_tot" ] || pr_fail="${pr_all#*$'\n'}"
     if ls "$job/baseline"/*.xml >/dev/null 2>&1; then
+      base_ran=1
       base_all="$(cmd_junit "$job/baseline")"
       base_tot="${base_all%%$'\n'*}"
       base_fail=""; [ "$base_all" = "$base_tot" ] || base_fail="${base_all#*$'\n'}"
+      new_fail="$(comm -23 <(printf '%s\n' "$pr_fail" | grep -v '^$' | sort) <(printf '%s\n' "$base_fail" | grep -v '^$' | sort) || true)"
+      old_fail="$(comm -12 <(printf '%s\n' "$pr_fail" | grep -v '^$' | sort) <(printf '%s\n' "$base_fail" | grep -v '^$' | sort) || true)"
     else
-      base_tot=$'-\t-\t-\t-'; base_fail=""
+      base_tot=$'-\t-\t-\t-'
+      new_fail="unknown (the baseline produced no test reports); failing on this PR: ${pr_fail:-none}"
+      old_fail="unknown"
     fi
-    new_fail="$(comm -23 <(printf '%s\n' "$pr_fail" | grep -v '^$' | sort) <(printf '%s\n' "$base_fail" | grep -v '^$' | sort) || true)"
-    old_fail="$(comm -12 <(printf '%s\n' "$pr_fail" | grep -v '^$' | sort) <(printf '%s\n' "$base_fail" | grep -v '^$' | sort) || true)"
     tests_section="## Tests (scope: $(tr '\n' ';' < "$job/scope.txt"))
 
 | run | tests | failures | errors | skipped |
@@ -85,9 +90,13 @@ cmd_render() {
 
 **Also failing on the base:** ${old_fail:-none}
 "
-    while IFS= read -r line; do
-      [ -n "$line" ] && human="$human- $line fails on this PR and not on the base."$'\n'
-    done <<< "$new_fail"
+    if [ "$base_ran" -eq 1 ]; then
+      while IFS= read -r line; do
+        [ -n "$line" ] && human="$human- $line fails on this PR and not on the base."$'\n'
+      done <<< "$new_fail"
+    else
+      human="$human- the baseline produced no test reports, so the PR's failures could not be compared to the base; see \`baseline.log\`."$'\n'
+    fi
   fi
 
   local tree_section="" launch_section="" checks_line

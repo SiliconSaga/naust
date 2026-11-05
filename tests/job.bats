@@ -24,7 +24,7 @@ case "$1 $2" in
       > "$comp/engine-tests/build/test-results/unitTest/TEST-${3:-all}.xml" ;;
   "review terasology")
     echo "review GH_TOKEN=${GH_TOKEN:-unset}" >> "$STUB_LOG"
-    case "$3" in checks) echo "Checks: 1 pass, 0 fail, 0 pending" ;; comment) ;; esac ;;
+    case "$3" in checks) echo "Checks: 1 pass, 0 fail, 0 pending" ;; comment) exit "${WS_COMMENT_EXIT:-0}" ;; esac ;;
 esac
 EOF
 chmod +x "$BAY_DIR/scripts/ws"
@@ -177,6 +177,25 @@ bay_state() { sed -n 's/^state=//p' "$NAUST_DIR/state/bays/bay-1.state"; }
     [ "$(step_status 9)" = pass ]
     grep -q 'cannot return to cr/7' "$JOB/baseline.log"
     ! grep -q '^bayws build' "$STUB_LOG"
+    [ "$(bay_state)" = "free" ]                     # the tree sits on the base, not the PR: nothing to judge
+}
+
+@test "a PR comment that cannot be posted fails the report step, and the job record still lands" {
+    export WS_COMMENT_EXIT=1
+    run_naust job bay-1 "$JOBFILE"
+    [ "$status" -ne 0 ]
+    [ "$(step_status 9)" = fail ]
+    grep -q 'PR comment failed' "$JOB/report.log"
+    grep -q '^curl ' "$STUB_LOG"                    # Discord still hears about it
+    [ -f "$NAUST_DIR/state/jobs/MovingBlocks__Terasology-7-${PR_SHA:0:7}/report.md" ]
+    [ "$(bay_state)" = "ready" ]
+}
+
+@test "the reset keeps the bay busy with this job, so nothing can claim it before the job goes on" {
+    run_naust job bay-1 "$JOBFILE"
+    [ "$status" -eq 0 ]
+    ! grep -q '^ws bay set' "$STUB_LOG"
+    [ "$(sed -n 's/^job=//p' "$NAUST_DIR/state/bays/bay-1.state")" = "MovingBlocks__Terasology-7-${PR_SHA:0:7}" ]
 }
 
 @test "a failed build skips compile-all, tests and both boots but still reports" {

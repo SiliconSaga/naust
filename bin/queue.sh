@@ -9,6 +9,8 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$HERE/lib.sh"
 load_config
 
+# owner/name with the slash doubled. A GitHub owner never holds an underscore,
+# so no two repositories share a key.
 job_path() { printf '%s/queue/%s__%s.job\n' "$STATE_DIR" "${1//\//__}" "$2"; }
 
 cmd_put() {
@@ -27,8 +29,10 @@ cmd_put() {
   if [ -f "$f" ] && [ "$(kv_get "$f" head)" = "$head" ]; then
     # The same head again: keep its place in the queue, but an operator's
     # `naust dock` on top of a polled entry must not be lost. Priority only
-    # rises; a named target or bay replaces an absent one.
+    # rises; a named target or bay replaces an absent one; the base follows
+    # the PR, since it can be retargeted while it waits.
     local changed=""
+    if [ -n "$base" ] && [ "$base" != "$(kv_get "$f" base)" ]; then kv_set "$f" base "$base"; changed="$changed base=$base"; fi
     if [ "$priority" -gt "$(kv_get "$f" priority)" ]; then kv_set "$f" priority "$priority"; changed="$changed priority=$priority"; fi
     if [ -n "$with" ] && [ "$with" != "$(kv_get "$f" with)" ]; then kv_set "$f" with "$with"; changed="$changed with=$with"; fi
     if [ -n "$bay" ] && [ "$bay" != "$(kv_get "$f" bay)" ]; then kv_set "$f" bay "$bay"; changed="$changed bay=$bay"; fi

@@ -75,7 +75,9 @@ comp_remote() {
   printf '%s\n' "$r"
 }
 
-step_reset() { bash "$HERE/bay.sh" reset "$BAY" --keep "$JOBID" && bash "$HERE/bay.sh" set "$BAY" busy; }
+# A reset that keeps this job's outputs also keeps the bay busy with it, so
+# nothing can claim the bay between the reset and the next step.
+step_reset() { bash "$HERE/bay.sh" reset "$BAY" --keep "$JOBID"; }
 
 # A step function runs as an if-condition, which turns errexit off inside it,
 # so every command that must not be skipped past carries its own || return 1.
@@ -197,19 +199,24 @@ step_tree() {
   [ "$unknown" -eq 0 ]
 }
 
+# The PR comment is how a maintainer hears of the job, so a report that could
+# not be rendered or posted fails this step; the Discord notice and the CI
+# read are best effort. The job record is kept either way.
 step_report() {
+  local ok=1
   with_token in_bay review "$COMP" checks "$number" > "$JOB/checks.txt" 2>&1 || true
-  bash "$REPORT_SCRIPT" render "$JOB"
-  if [ "$(prof "$NAUST_PROFILE" .report.comment on)" = on ]; then
-    with_token in_bay review "$COMP" comment "$number" ".outputs/naust/$JOBID/comment.md"
+  bash "$REPORT_SCRIPT" render "$JOB" || { echo "report render failed"; ok=0; }
+  if [ "$ok" -eq 1 ] && [ "$(prof "$NAUST_PROFILE" .report.comment on)" = on ]; then
+    with_token in_bay review "$COMP" comment "$number" ".outputs/naust/$JOBID/comment.md" || { echo "PR comment failed"; ok=0; }
   fi
   if [ -f "$JOB/screenshot.png" ]; then
-    bash "$HERE/notify.sh" say "$(head -c 1500 "$JOB/report.md")" --file "$JOB/screenshot.png" || true
+    bash "$HERE/notify.sh" say "$(head -c 1500 "$JOB/report.md" 2>/dev/null)" --file "$JOB/screenshot.png" || true
   else
-    bash "$HERE/notify.sh" say "$(head -c 1500 "$JOB/report.md")" || true
+    bash "$HERE/notify.sh" say "$(head -c 1500 "$JOB/report.md" 2>/dev/null)" || true
   fi
   rm -rf "$STATE_DIR/jobs/$JOBID"
   cp -r "$JOB" "$STATE_DIR/jobs/$JOBID"
+  [ "$ok" -eq 1 ]
 }
 
 mkdir -p "$JOB"
@@ -238,10 +245,11 @@ else
 fi
 run_step 9 report step_report || true
 # A bay with a finished job waits for a human. A broken reset keeps the bay
-# broken, and a head that moved before anything was built leaves nothing to
-# look at, so that bay goes straight back to the pool.
+# broken. A head that moved before anything was built, or a tree stuck on
+# the merge base, leaves no PR to look at, so that bay goes straight back to
+# the pool.
 if [ "$(bash "$HERE/bay.sh" list | awk -F'\t' -v b="$BAY" '$1 == b { print $2 }')" != broken ]; then
-  if [ "$HEAD_MOVED" -eq 1 ]; then
+  if [ "$HEAD_MOVED" -eq 1 ] || [ "$BASELINE_LOST" -eq 1 ]; then
     bash "$HERE/bay.sh" set "$BAY" free
   else
     bash "$HERE/bay.sh" set "$BAY" ready

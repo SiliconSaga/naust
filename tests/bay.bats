@@ -69,7 +69,7 @@ EOF
     [[ "$output" == *"already"* ]]
 }
 
-@test "reset runs ws bay reset, clears the old job outputs but keeps the current job's, runs the hook and frees the bay" {
+@test "reset runs ws bay reset, clears the old job outputs but keeps the current job's, runs the hook, and frees the bay unless a job keeps it" {
     make_bay bay-1 ready
     mkdir -p "$BAY_DIR/.outputs/naust/old" "$BAY_DIR/.outputs/naust/current"
     touch "$BAY_DIR/.outputs/naust/old/report.md" "$BAY_DIR/.outputs/naust/current/reset.log"
@@ -79,10 +79,15 @@ EOF
     [ ! -e "$BAY_DIR/.outputs/naust/old" ]
     [ -f "$BAY_DIR/.outputs/naust/current/reset.log" ]
     grep -q '^after-reset-stub' "$STUB_LOG"
-    [ "$(state_of bay-1)" = "free" ]
+    # The job that asked to keep its outputs is still running here: the bay stays its.
+    [ "$(state_of bay-1)" = "busy" ]
+    [ "$(sed -n 's/^job=//p' "$NAUST_DIR/state/bays/bay-1.state")" = "current" ]
+    run_naust bay claim bay-1 job-2
+    [ "$status" -ne 0 ]
     run_naust bay reset bay-1
     [ "$status" -eq 0 ]
     [ ! -e "$BAY_DIR/.outputs/naust/current" ]
+    [ "$(state_of bay-1)" = "free" ]
 }
 
 @test "a failing hook marks the bay broken instead of leaving it as it was" {

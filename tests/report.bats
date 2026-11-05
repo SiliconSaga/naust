@@ -64,6 +64,19 @@ YAML
     grep -q 'What needs a human' "$c"
 }
 
+@test "a baseline that produced no reports attributes no failure to the PR" {
+    rm -f "$JOB/baseline"/*
+    run_naust report render "$JOB"
+    [ "$status" -eq 0 ]
+    r="$JOB/report.md"
+    grep -q '| PR | 6 | 1 | 1 | 1 |' "$r"
+    grep -q '| base | - | - | - | - |' "$r"
+    grep -q 'New on this PR:\*\* unknown' "$r"
+    ! grep -q 'fails on this PR and not on the base' "$r"
+    grep -q 'baseline produced no test reports' "$r"
+    grep -q 'org.x.BTest.broken' "$r"
+}
+
 @test "a skipped step reads as not run, never as passed" {
     printf '1\treset\tfail\t3\n2\tcheckout\tskipped\t0\n9\treport\tpass\t1\n' > "$JOB/steps.tsv"
     rm -f "$JOB/reports"/* "$JOB/baseline"/*

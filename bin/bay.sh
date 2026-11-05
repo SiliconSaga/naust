@@ -105,8 +105,15 @@ cmd_reset() {
     [ "$(basename "$d")" = "$keep" ] || rm -rf "$d"
   done
   bay_run_in_comp "after_reset" "$(prof "$NAUST_PROFILE" .hooks.after_reset)"
-  bay_set_state "$name" free ""
-  log "reset $name: free in $(( $(now) - started )) s"
+  # The job that keeps its outputs is still running here: the bay stays
+  # busy with it, or a claim could land between this reset and its next step.
+  if [ -n "$keep" ]; then
+    bay_set_state "$name" busy "$keep"
+    log "reset $name: busy with $keep after $(( $(now) - started )) s"
+  else
+    bay_set_state "$name" free ""
+    log "reset $name: free in $(( $(now) - started )) s"
+  fi
 }
 
 cmd_add() {

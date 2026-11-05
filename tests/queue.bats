@@ -31,6 +31,15 @@ put() { run_naust queue put terasology MovingBlocks/Terasology "$@"; }
     grep -q '^with=terasology/modules/Health#12$' "$f"
 }
 
+@test "put at the same head takes a new base, since a PR can be retargeted while it waits" {
+    put 7 abc123 develop stranger stranger/Terasology
+    put 7 abc123 main stranger stranger/Terasology
+    [ "$status" -eq 0 ]
+    f="$NAUST_DIR/state/queue/MovingBlocks__Terasology__7.job"
+    grep -q '^base=main$' "$f"
+    grep -q 'base=main' "$NAUST_LOG"
+}
+
 @test "order lists every job the way next picks them; next is the first" {
     NAUST_NOW=100 put 1 a develop x x/y
     NAUST_NOW=200 put 2 b develop x x/y --priority 5
