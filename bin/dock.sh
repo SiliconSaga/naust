@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
-# Queue a pull request by hand, ahead of polled ones. The trust gate still
-# applies to the head as it is now; the debounce does not.
+# Queue a pull request by hand, ahead of polled ones. The operator's command
+# is the vouch: the nod exists for the unattended tick, where nobody is at
+# the keyboard, so no GitHub review is asked for here and the debounce does
+# not apply. The head is read now and the job stops if it has moved by the
+# time it runs, since that is a commit the operator never saw.
 #
 #   dock.sh <profile> <number> [--with <target>#<n>]... [--bay <name>]
 set -euo pipefail
@@ -27,10 +30,6 @@ IFS=$'\t' read -r head base author head_repo < <(gh pr view "$number" --repo "$r
   --json headRefOid,baseRefName,author,headRepositoryOwner,headRepository \
   --jq '[.headRefOid, .baseRefName, .author.login, ((.headRepositoryOwner.login // "") + "/" + (.headRepository.name // ""))] | @tsv')
 [ -n "$head" ] || die "naust dock: could not read $repo#$number"
-IFS=$'\t' read -r decision reason < <(bash "$HERE/gate.sh" decide "$profile" "$repo" "$number" "$author" "$head_repo" "$head")
-if [ "$decision" != run ]; then
-  die "naust dock: $repo#$number $reason"
-fi
-log "run: $repo#$number ($reason)"
+log "dock: $repo#$number at ${head:0:7} by $author queued on the operator's word"
 bash "$HERE/queue.sh" put "$profile" "$repo" "$number" "$head" "$base" "$author" "$head_repo" --priority 10 ${with:+--with "$with"} ${bay:+--bay "$bay"}
 bash "$HERE/poll.sh" mark "$profile" "$number" queued "$head"

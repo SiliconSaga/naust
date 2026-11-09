@@ -25,10 +25,12 @@ setup() {
     grep -q 'gh pr view 7 --repo MovingBlocks/Terasology --json headRefOid' "$STUB_LOG"
 }
 
-@test "dock refuses a PR that needs a nod and says why" {
+@test "dock queues a stranger's PR without asking GitHub for a nod: the operator's command is the vouch" {
     export RUN_PR=$'abc123\tdevelop\tstranger\tstranger/Terasology'
     run_naust dock terasology 7
-    [ "$status" -ne 0 ]
-    [[ "$output" == *"needs a nod from a maintainer"* ]]   # die echoes to stderr even when NAUST_LOG is set
-    [ ! -e "$NAUST_DIR/state/queue/MovingBlocks__Terasology__7.job" ]
+    [ "$status" -eq 0 ]
+    f="$NAUST_DIR/state/queue/MovingBlocks__Terasology__7.job"
+    grep -q '^head=abc123$' "$f"
+    grep -q "on the operator's word" "$NAUST_LOG"
+    ! grep -q -- '--json reviews' "$STUB_LOG"
 }
