@@ -185,3 +185,23 @@ EOF
     [[ "$output" == *"export NAUST_REALM_DIR=$BAY_DIR/realms/realm-test"* ]]
     [[ "$output" == *"export GRADLE_USER_HOME=$NAUST_DIR/gradle-home"* ]]
 }
+
+@test "env writes the profile's Gradle daemon settings into the shared Gradle home, once, and only when the profile has them" {
+    make_bay bay-1 free
+    run_naust bay env bay-1
+    [ "$status" -eq 0 ]
+    p="$NAUST_DIR/gradle-home/gradle.properties"
+    grep -q '^org.gradle.jvmargs=-Xmx1g -XX:MaxMetaspaceSize=256m$' "$p"
+    [ "$(grep -c '^org.gradle.jvmargs=' "$p")" -eq 1 ]
+    run_naust bay env bay-1
+    [ "$(grep -c '^org.gradle.jvmargs=' "$p")" -eq 1 ]
+    yq -i '.gradle.jvmargs = "-Xmx2g"' "$NAUST_WORKSPACE/realms/realm-test/naust/terasology.yaml"
+    run_naust bay env bay-1
+    grep -q '^org.gradle.jvmargs=-Xmx2g$' "$p"
+    [ "$(grep -c '^org.gradle.jvmargs=' "$p")" -eq 1 ]
+    rm -f "$p"
+    yq -i 'del(.gradle)' "$NAUST_WORKSPACE/realms/realm-test/naust/terasology.yaml"
+    run_naust bay env bay-1
+    [ "$status" -eq 0 ]
+    [ ! -e "$p" ]
+}

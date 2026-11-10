@@ -38,6 +38,16 @@ bay_env() { # <name>
   export NAUST_COMP_DIR="$dir/components/$comp"
   export NAUST_REALM_DIR="$dir/realms/$REALM"
   export GRADLE_USER_HOME="$GRADLE_HOME"
+  # The daemon's JVM is the profile's to size: a build that configures the
+  # whole module set thrashes Gradle's 512 MiB default. The shared Gradle
+  # home's gradle.properties carries it, rewritten only when it differs, so
+  # a hand-run build in the bay gets the same daemon a job does.
+  local jvmargs props
+  jvmargs="$(prof "$profile" .gradle.jvmargs)"
+  if [ -n "$jvmargs" ]; then
+    props="$GRADLE_HOME/gradle.properties"
+    grep -qxF "org.gradle.jvmargs=$jvmargs" "$props" 2>/dev/null || kv_set "$props" org.gradle.jvmargs "$jvmargs"
+  fi
   # The bay's log, shared with ws bay: naust's lines and the output of its
   # long steps go there, and `ws bay log <name> --follow` shows them.
   mkdir -p "$dir/.outputs"

@@ -90,6 +90,8 @@ repo: MovingBlocks/Terasology
 persona: Gooey
 bay:
   ready_ttl_days: 7
+gradle:
+  jvmargs: "-Xmx1g -XX:MaxMetaspaceSize=256m"
 steps:
   compile_all: "compile-all-stub"
   headless: "headless-stub"
