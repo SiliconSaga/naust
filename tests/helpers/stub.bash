@@ -1,3 +1,8 @@
+# `run ! cmd` needs 1.5; a bare `! cmd` line cannot fail a test, since
+# errexit ignores negated commands, so every "did not happen" assertion
+# here uses run.
+bats_require_minimum_version 1.5.0
+
 # Fake executables on PATH so bats can assert how scripts call gh/git/curl.
 # Each stub appends its argv to "$STUB_LOG" and runs the provided body.
 make_stub() {
@@ -76,15 +81,13 @@ EOF
   printf 'realm: realm-test\n' > "$WORKSPACE/ecosystem.local.yaml"
   cat > "$NAUST_CONFIG" <<'YAML'
 profiles: [terasology]
+account: agent-refr
 lock_stale_hours: 6
 YAML
   cat > "$WORKSPACE/realms/realm-test/naust/terasology.yaml" <<'YAML'
 component: terasology
 repo: MovingBlocks/Terasology
 persona: Gooey
-poll:
-  debounce_minutes: 10
-  skip_drafts: true
 bay:
   ready_ttl_days: 7
 steps:
@@ -99,8 +102,9 @@ report:
 YAML
   cat > "$WORKSPACE/realms/realm-test/naust/trust.yaml" <<'YAML'
 terasology:
-  maintainers: [Cervator, jdrueckert]
-  trusted: [SiliconSaga/Terasology, trustedbot]
+  smidir:
+    Cervator: agent-refr
+    jdrueckert: ~
   nod_phrase: "haul it in"
 YAML
   cat > "$WORKSPACE/realms/realm-test/adapters/terasology.yaml" <<'YAML'

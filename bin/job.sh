@@ -20,6 +20,7 @@ repo="$(kv_get "$JOBFILE" repo)"; number="$(kv_get "$JOBFILE" number)"
 head="$(kv_get "$JOBFILE" head)"; base="$(kv_get "$JOBFILE" base)"
 author="$(kv_get "$JOBFILE" author)"; head_repo="$(kv_get "$JOBFILE" head_repo)"
 with="$(kv_get "$JOBFILE" with)"
+comment="$(kv_get "$JOBFILE" comment)"   # on only when whoever queued the job said the report may go to the PR
 JOBID="$(basename "$JOBFILE" .job)"
 JOB="$NAUST_BAY_DIR/.outputs/naust/$JOBID"
 STEPS="$JOB/steps.tsv"
@@ -34,7 +35,7 @@ export NAUST_JOB_DIR="$JOB" NAUST_PR_NUMBER="$number" NAUST_PR_HEAD="$head"
 
 FAILED=0
 HEAD_MOVED=0
-BASELINE_LOST=0   # the tree could not come back from the merge base; nothing after may run
+BASELINE_FAILED=0   # the base could not be tested here: the bay cannot judge the PR, and nothing after may run
 record() { printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" >> "$STEPS"; }
 skip() { record "$1" "$2" skipped 0; }
 skip_all() { local s; for s in "$@"; do skip "${s%% *}" "${s#* }"; done; }   # "<id> <name>" pairs
@@ -98,7 +99,7 @@ step_checkout() {
     [ "$HEAD_SHA" = "$head" ] || printf 'head_fetched: %s\n' "$HEAD_SHA"
   } > "$JOB/job.yaml"
   if [ "$HEAD_SHA" != "$head" ]; then
-    echo "head moved: the gate admitted $head, the fetch returned $HEAD_SHA; a new nod is needed for the new head"
+    echo "head moved: the job was given $head, the fetch returned $HEAD_SHA; the new head needs to be called in on its own"
     HEAD_MOVED=1
     return 1
   fi
@@ -163,11 +164,16 @@ run_scope() { # <dest>
   echo "$gathered report files gathered"
 }
 
+# The base branch is what the bay was provisioned to build. A base that
+# cannot be tested here says the bay is sick (no disk, a cache gone wrong,
+# a tree that will not switch), not that the PR is, so the job stops and
+# nothing it would say reaches the PR.
 step_baseline() {
   local rc=0
-  git -C "$NAUST_COMP_DIR" switch -q --detach "$MERGE_BASE" || return 1
+  git -C "$NAUST_COMP_DIR" switch -q --detach "$MERGE_BASE" || { BASELINE_FAILED=1; return 1; }
   run_scope "$JOB/baseline" || rc=1
-  git -C "$NAUST_COMP_DIR" switch -q "cr/$number" || { echo "cannot return to cr/$number; the tree is on the merge base"; BASELINE_LOST=1; return 1; }
+  git -C "$NAUST_COMP_DIR" switch -q "cr/$number" || { echo "cannot return to cr/$number; the tree is on the merge base"; rc=1; }
+  [ "$rc" -eq 0 ] || BASELINE_FAILED=1
   return "$rc"
 }
 step_build() { in_bay build "$COMP"; }
@@ -199,14 +205,16 @@ step_tree() {
   [ "$unknown" -eq 0 ]
 }
 
-# The PR comment is how a maintainer hears of the job, so a report that could
-# not be rendered or posted fails this step; the Discord notice and the CI
-# read are best effort. The job record is kept either way.
+# The PR comment is how a maintainer hears of a job they called in, so a
+# report that could not be rendered or posted fails this step; the Discord
+# notice and the CI read are best effort. The job record is kept either way.
+# A job queued without comment, which is every hand-docked one, reports to
+# the bay and the terminal only; so does one the bay could not judge.
 step_report() {
   local ok=1
   with_token in_bay review "$COMP" checks "$number" > "$JOB/checks.txt" 2>&1 || true
   bash "$REPORT_SCRIPT" render "$JOB" || { echo "report render failed"; ok=0; }
-  if [ "$ok" -eq 1 ] && [ "$(prof "$NAUST_PROFILE" .report.comment on)" = on ]; then
+  if [ "$ok" -eq 1 ] && [ "$comment" = on ] && [ "$BASELINE_FAILED" -eq 0 ]; then
     with_token in_bay review "$COMP" comment "$number" ".outputs/naust/$JOBID/comment.md" || { echo "PR comment failed"; ok=0; }
   fi
   if [ -f "$JOB/screenshot.png" ]; then
@@ -226,8 +234,8 @@ if run_step 1 reset step_reset; then
   if run_step 2 checkout step_checkout; then
     run_step 3 scope step_scope || true
     run_step 4 baseline step_baseline || true
-    if [ "$BASELINE_LOST" -eq 1 ]; then
-      skip_all "5 build" "5b compile-all" "5c tests" "6 headless" "7 launch" "8 tree"   # every one would be judging the base
+    if [ "$BASELINE_FAILED" -eq 1 ]; then
+      skip_all "5 build" "5b compile-all" "5c tests" "6 headless" "7 launch" "8 tree"   # the bay cannot judge anything
     elif run_step 5 build step_build; then
       run_step 5b compile-all step_compile_all || true
       run_step 5c tests step_tests || true
@@ -236,7 +244,7 @@ if run_step 1 reset step_reset; then
     else
       skip 5b compile-all; skip 5c tests; skip 6 headless; skip 7 launch
     fi
-    [ "$BASELINE_LOST" -eq 1 ] || run_step 8 tree step_tree || true
+    [ "$BASELINE_FAILED" -eq 1 ] || run_step 8 tree step_tree || true
   else
     skip_all "3 scope" "4 baseline" "5 build" "5b compile-all" "5c tests" "6 headless" "7 launch" "8 tree"
   fi
@@ -245,11 +253,14 @@ else
 fi
 run_step 9 report step_report || true
 # A bay with a finished job waits for a human. A broken reset keeps the bay
-# broken. A head that moved before anything was built, or a tree stuck on
-# the merge base, leaves no PR to look at, so that bay goes straight back to
-# the pool.
+# broken, and a base that would not test marks it so: an operator reads
+# baseline.log and resets it. A head that moved before anything was built
+# leaves no PR to look at, so that bay goes straight back to the pool.
 if [ "$(bash "$HERE/bay.sh" list | awk -F'\t' -v b="$BAY" '$1 == b { print $2 }')" != broken ]; then
-  if [ "$HEAD_MOVED" -eq 1 ] || [ "$BASELINE_LOST" -eq 1 ]; then
+  if [ "$BASELINE_FAILED" -eq 1 ]; then
+    bash "$HERE/bay.sh" set "$BAY" broken
+    log "job $JOBID: the base branch could not be tested in $BAY; bay marked broken, nothing posted"
+  elif [ "$HEAD_MOVED" -eq 1 ]; then
     bash "$HERE/bay.sh" set "$BAY" free
   else
     bash "$HERE/bay.sh" set "$BAY" ready

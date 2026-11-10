@@ -53,14 +53,33 @@ YAML
     grep -q 'Checks: 1 pass, 0 fail, 0 pending' "$r"
     grep -q '## What needs a human' "$r"
     grep -q 'launch check failed' "$r"
+    grep -q 'last line of launch' "$r"
     grep -q 'org.x.BTest.broken' "$r"
+    run ! grep -q 'file changed' "$r"                   # GitHub shows the diff; the report does not repeat it
+}
+
+@test "a launch that did not run has no log excerpt to show" {
+    printf '1\treset\tpass\t3\n5\tbuild\tfail\t2\n7\tlaunch\tskipped\t0\n9\treport\tpass\t1\n' > "$JOB/steps.tsv"
+    rm -f "$JOB/reports"/* "$JOB/baseline"/*
+    run_naust report render "$JOB"
+    grep -q -- '- launch: not run' "$JOB/report.md"
+    run ! grep -q 'last lines of' "$JOB/report.md"
+}
+
+@test "a failed baseline tells the human the bay could not judge the PR" {
+    printf '1\treset\tpass\t3\n2\tcheckout\tpass\t5\n3\tscope\tpass\t1\n4\tbaseline\tfail\t200\n5\tbuild\tskipped\t0\n9\treport\tpass\t1\n' > "$JOB/steps.tsv"
+    rm -f "$JOB/reports"/* "$JOB/baseline"/*
+    run_naust report render "$JOB"
+    grep -q 'base branch could not be tested in this bay' "$JOB/report.md"
+    grep -q 'broken' "$JOB/report.md"
+    run ! grep -q 'baseline failed; see' "$JOB/report.md"
 }
 
 @test "comment.md is signed by the persona and names no bay path" {
     run_naust report render "$JOB"
     c="$JOB/comment.md"
     grep -q 'Gooey' "$c"
-    ! grep -q "$BATS_TEST_TMPDIR" "$c"
+    run ! grep -q "$BATS_TEST_TMPDIR" "$c"
     grep -q 'What needs a human' "$c"
 }
 
@@ -72,7 +91,7 @@ YAML
     grep -q '| PR | 6 | 1 | 1 | 1 |' "$r"
     grep -q '| base | - | - | - | - |' "$r"
     grep -q 'New on this PR:\*\* unknown' "$r"
-    ! grep -q 'fails on this PR and not on the base' "$r"
+    run ! grep -q 'fails on this PR and not on the base' "$r"
     grep -q 'baseline produced no test reports' "$r"
     grep -q 'org.x.BTest.broken' "$r"
 }
@@ -83,7 +102,7 @@ YAML
     run_naust report render "$JOB"
     grep -q '| 2 | checkout | not run |' "$JOB/report.md"
     grep -q 'reset failed' "$JOB/report.md"
-    ! grep -q '| PR |' "$JOB/report.md"
+    run ! grep -q '| PR |' "$JOB/report.md"
 }
 
 @test "a moved head is the first thing a human reads" {
@@ -92,5 +111,5 @@ YAML
     rm -f "$JOB/reports"/* "$JOB/baseline"/*
     run_naust report render "$JOB"
     grep -q 'head moved' "$JOB/report.md"
-    grep -q 'new nod' "$JOB/comment.md"
+    grep -q 'call the new head in' "$JOB/comment.md"
 }

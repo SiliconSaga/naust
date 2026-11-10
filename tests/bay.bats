@@ -25,7 +25,7 @@ state_of() { sed -n 's/^state=//p' "$NAUST_DIR/state/bays/$1.state"; }
     grep -q '^ws bay reset bay-1$' "$STUB_LOG"
     grep -q '^bayws exec terasology bash -c after-reset-stub$' "$STUB_LOG"
     grep -q '^after-reset-stub' "$STUB_LOG"
-    ! grep -q '^bash -c' "$STUB_LOG"
+    run ! grep -q '^bash -c' "$STUB_LOG"
     [ "$(state_of bay-1)" = "free" ]
     [ "$(sed -n 's/^profile=//p' "$NAUST_DIR/state/bays/bay-1.state")" = "terasology" ]
 }
@@ -105,7 +105,7 @@ EOF
     [ "$status" -ne 0 ]
     [ "$(state_of bay-2)" = "broken" ]
     grep -q "compile_all failed" "$NAUST_LOG"
-    ! grep -q '^after-add-stub' "$STUB_LOG"
+    run ! grep -q '^after-add-stub' "$STUB_LOG"
 }
 
 @test "a failed ws bay reset marks the bay broken and skips the hook" {
@@ -115,7 +115,7 @@ EOF
     [ "$status" -ne 0 ]
     grep -q "reset bay-1: ws bay reset failed" "$NAUST_LOG"
     [ "$(state_of bay-1)" = "broken" ]
-    ! grep -q '^after-reset-stub' "$STUB_LOG"
+    run ! grep -q '^after-reset-stub' "$STUB_LOG"
 }
 
 @test "claim takes a free bay once; release frees a ready or held bay" {

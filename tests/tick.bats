@@ -1,12 +1,15 @@
 #!/usr/bin/env bats
 load helpers/stub
 
+# The gh stub answers the account check, the PR list, and the reviews of PR 7
+# only; every other PR has none.
 setup() {
     naust_setup
-    export POLL_PRS="" GATE_REVIEWS=""
+    export POLL_PRS="" GATE_REVIEWS="" GH_LOGIN=agent-refr
     make_stub gh 'case "$*" in
+      "api user"*) printf "%s\n" "$GH_LOGIN" ;;
       *"pr list"*) printf "%s\n" "$POLL_PRS" ;;
-      *"--json reviews"*) printf "%s\n" "$GATE_REVIEWS" ;;
+      "pr view 7 "*"--json reviews"*) printf "%s\n" "$GATE_REVIEWS" ;;
     esac'
     make_stub curl
     printf 'NAUST_DISCORD_WEBHOOK=https://discord.invalid/hook\nNAUST_GITHUB_TOKEN=tok\n' > "$NAUST_ENV_FILE"
@@ -14,25 +17,44 @@ setup() {
     printf '#!/usr/bin/env bash\necho "job $*" >> "$STUB_LOG"\n' > "$NAUST_JOB_SCRIPT"
 }
 
-pr_line() { printf '%s\t%s\t%s\t%s\t%s\t%s\t%s' "$1" "$2" develop "$3" "$3/Terasology" false 2026-10-08T00:00:00Z; }
-aged() { printf 'sha=%s\nfirst_seen=%s\n' "$2" $((NAUST_NOW - 3600)) > "$NAUST_DIR/state/seen/MovingBlocks__Terasology/$1"; }
+pr_line() { printf '%s\t%s\t%s\t%s\t%s\t%s\t%s' "$1" "$2" develop "$3" "$3/Terasology" false "${4:-2026-10-08T00:00:00Z}"; }
+review() { printf '%s\t%s\t%s\t%s' "$1" "$2" "$3" "${4:-false}"; }
 
-@test "a maintainer's PR is queued and marked; a stranger's gets one notice" {
-    mkdir -p "$NAUST_DIR/state/seen/MovingBlocks__Terasology"
-    aged 7 abc123; aged 8 bbb222
+@test "a called-in PR is queued to comment; one nobody called in waits, with no notice to anyone" {
     export POLL_PRS="$(pr_line 7 abc123 Cervator)
 $(pr_line 8 bbb222 stranger)"
+    export GATE_REVIEWS="$(review Cervator COMMENTED abc123 true)"
     run_naust tick
     [ "$status" -eq 0 ]
-    [ -f "$NAUST_DIR/state/queue/MovingBlocks__Terasology__7.job" ] || [ -f "$NAUST_DIR/state/jobs/MovingBlocks__Terasology-7-abc123.job" ]
+    f="$NAUST_DIR/state/queue/MovingBlocks__Terasology__7.job"
+    [ -f "$f" ] || f="$NAUST_DIR/state/jobs/MovingBlocks__Terasology-7-abc123.job"
+    grep -q '^comment=on$' "$f"
     [ ! -e "$NAUST_DIR/state/queue/MovingBlocks__Terasology__8.job" ]
     [ "$(sed -n 's/^queued=//p' "$NAUST_DIR/state/seen/MovingBlocks__Terasology/7")" = "abc123" ]
-    [ "$(sed -n 's/^notified=//p' "$NAUST_DIR/state/seen/MovingBlocks__Terasology/8")" = "bbb222" ]
-    [ "$(grep -c '^curl ' "$STUB_LOG")" -eq 1 ]
-    grep -q 'needs a nod' "$STUB_LOG"
-    grep -q 'https://github.com/MovingBlocks/Terasology/pull/8' "$STUB_LOG"
+    [ "$(sed -n 's/^gated=//p' "$NAUST_DIR/state/seen/MovingBlocks__Terasology/8")" = "2026-10-08T00:00:00Z" ]
+    run ! grep -q '^curl ' "$STUB_LOG"
+    grep -q 'MovingBlocks/Terasology#8 waiting' "$NAUST_LOG"
+    # nothing happened on PR 8 since: the next tick does not read its reviews again
     run_naust tick
-    [ "$(grep -c '^curl ' "$STUB_LOG")" -eq 1 ]
+    [ "$(grep -c 'gh pr view 8 ' "$STUB_LOG")" -eq 1 ]
+}
+
+@test "a PR the profile says not to comment on is queued quiet" {
+    yq -i '.report.comment = "off"' "$NAUST_WORKSPACE/realms/realm-test/naust/terasology.yaml"
+    export POLL_PRS="$(pr_line 7 abc123 Cervator)"
+    export GATE_REVIEWS="$(review Cervator COMMENTED abc123 true)"
+    run_naust tick
+    f="$NAUST_DIR/state/queue/MovingBlocks__Terasology__7.job"
+    [ -f "$f" ] || f="$NAUST_DIR/state/jobs/MovingBlocks__Terasology-7-abc123.job"
+    grep -q '^comment=off$' "$f"
+}
+
+@test "a token that is not the configured account's stops the tick before it polls" {
+    export GH_LOGIN=someone-else
+    run_naust tick
+    [ "$status" -ne 0 ]
+    grep -q 'someone-else' "$NAUST_LOG"
+    run ! grep -q 'pr list' "$STUB_LOG"
 }
 
 @test "a queued job runs in a free bay and leaves the queue" {
@@ -52,7 +74,7 @@ $(pr_line 8 bbb222 stranger)"
     [ "$status" -eq 0 ]
     grep -q "no free bay" "$NAUST_LOG"
     [ -f "$NAUST_DIR/state/queue/MovingBlocks__Terasology__7.job" ]
-    ! grep -q '^job ' "$STUB_LOG"
+    run ! grep -q '^job ' "$STUB_LOG"
 }
 
 @test "a pinned bay that is not free keeps the job queued" {
@@ -62,7 +84,7 @@ $(pr_line 8 bbb222 stranger)"
     run_naust tick
     [ "$status" -eq 0 ]
     [ -f "$NAUST_DIR/state/queue/MovingBlocks__Terasology__7.job" ]
-    ! grep -q '^job ' "$STUB_LOG"
+    run ! grep -q '^job ' "$STUB_LOG"
 }
 
 @test "a job pinned to a bay of another profile stays queued rather than running there" {
@@ -74,25 +96,8 @@ $(pr_line 8 bbb222 stranger)"
     [ "$status" -eq 0 ]
     grep -q "bay bay-2 belongs to other, not terasology" "$NAUST_LOG"
     [ -f "$NAUST_DIR/state/queue/MovingBlocks__Terasology__7.job" ]
-    ! grep -q '^job ' "$STUB_LOG"
+    run ! grep -q '^job ' "$STUB_LOG"
     [ "$(sed -n 's/^state=//p' "$NAUST_DIR/state/bays/bay-2.state")" = "free" ]
-}
-
-@test "a notice that could not be sent is sent again next tick" {
-    mkdir -p "$NAUST_DIR/state/seen/MovingBlocks__Terasology"
-    aged 8 bbb222
-    export POLL_PRS="$(pr_line 8 bbb222 stranger)"
-    make_stub curl 'exit 7'
-    run_naust tick
-    [ "$status" -eq 0 ]
-    [ "$(grep -c '^curl ' "$STUB_LOG")" -eq 1 ]
-    [ -z "$(sed -n 's/^notified=//p' "$NAUST_DIR/state/seen/MovingBlocks__Terasology/8")" ]
-    make_stub curl
-    run_naust tick
-    [ "$(grep -c '^curl ' "$STUB_LOG")" -eq 2 ]
-    [ "$(sed -n 's/^notified=//p' "$NAUST_DIR/state/seen/MovingBlocks__Terasology/8")" = "bbb222" ]
-    run_naust tick
-    [ "$(grep -c '^curl ' "$STUB_LOG")" -eq 2 ]
 }
 
 @test "a job that cannot get its bay does not block the next job that can" {
@@ -113,5 +118,5 @@ $(pr_line 8 bbb222 stranger)"
     run_naust tick
     [ "$status" -eq 0 ]
     grep -q "another tick" "$NAUST_LOG"
-    ! grep -q '^gh ' "$STUB_LOG"
+    run ! grep -q '^gh ' "$STUB_LOG"
 }

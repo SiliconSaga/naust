@@ -1,12 +1,17 @@
 #!/usr/bin/env bash
-# The trust gate: may this pull request head run in a bay, and why.
+# The gate: has someone called this pull request head into one of this
+# naust's bays, and who.
 #
-#   gate.sh decide <profile> <repo> <number> <author> <head_repo> <head>
+#   gate.sh decide <profile> <repo> <number> <head>
 #
-# Prints "run<TAB>reason" or "nod<TAB>reason". A nod is a review, because
-# GitHub records the commit every review was submitted against: an approval
-# or a "haul it in" from a maintainer admits that commit and no other. A
-# label cannot say which commit it meant, so labels are never read.
+# Prints "run<TAB>reason" or "wait<TAB>reason". Nothing runs unasked. A call
+# is a review on the PR whose text says the realm's phrase addressed to this
+# naust's machine account ("@agent-refr haul it in"), from a login the realm
+# lists as a smiðr. GitHub records the commit every review was submitted
+# against, so a call admits that commit and no other; a push after it needs
+# a new call. A review aimed at another naust's account is not for this one.
+# Approvals are a verdict on the code, not a request to run it, and labels
+# cannot say which commit they meant: neither is read.
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=bin/lib.sh
@@ -15,54 +20,44 @@ load_config
 require_tool gh
 
 has_line() { grep -qxF -- "$1"; }          # stdin: one candidate per line
-has_line_ci() { grep -qxiF -- "$1"; }
+
+# The phrase and the address sit inside a jq string literal (gh's --jq takes
+# no --arg), so backslashes and quotes are escaped for jq; nothing else is
+# special there.
+jq_literal() { local s="$1"; s="${s//\\/\\\\}"; s="${s//\"/\\\"}"; printf '%s' "$s"; }
 
 cmd_decide() {
-  local profile="$1" repo="$2" number="$3" author="$4" head_repo="$5" head="$6"
-  local maintainers trusted phrase lphrase reviews login state oid has_phrase ignored="" stale="" why
-  maintainers="$(trust_list "$profile" .maintainers)"
-  trusted="$(trust_list "$profile" .trusted)"
-  if printf '%s\n' "$maintainers" | has_line "$author"; then
-    printf 'run\tauthor %s is a maintainer\n' "$author"; return 0
-  fi
-  if printf '%s\n' "$trusted" | has_line "$author"; then
-    printf 'run\tauthor %s is trusted\n' "$author"; return 0
-  fi
-  if printf '%s\n' "$trusted" | has_line_ci "$head_repo"; then
-    printf 'run\thead repository %s is trusted\n' "$head_repo"; return 0
-  fi
+  local profile="$1" repo="$2" number="$3" head="$4"
+  local account smidir phrase lphrase laddress reviews login state oid called ignored="" stale="" why
+  account="$(cfg .account)"
+  [ -n "$account" ] || die "account: is not set in $NAUST_CONFIG; naust cannot tell which calls are for it"
+  smidir="$(trust_keys "$profile" .smidir)"
   phrase="$(trust "$profile" .nod_phrase 'haul it in')"
-  lphrase="$(printf '%s' "$phrase" | tr '[:upper:]' '[:lower:]')"
-  # The phrase sits inside a jq string literal (gh's --jq takes no --arg), so
-  # its backslashes and quotes are escaped for jq; nothing else is special there.
-  lphrase="${lphrase//\\/\\\\}"; lphrase="${lphrase//\"/\\\"}"
+  lphrase="$(jq_literal "$(printf '%s' "$phrase" | tr '[:upper:]' '[:lower:]')")"
+  laddress="$(jq_literal "@$(printf '%s' "$account" | tr '[:upper:]' '[:lower:]')")"
   reviews="$(gh pr view "$number" --repo "$repo" --json reviews \
-      --jq ".reviews[] | [.author.login, .state, (.commit.oid // \"\"), (((.body // \"\") | ascii_downcase | contains(\"$lphrase\")) | tostring)] | @tsv" 2>/dev/null || true)"
-  while IFS=$'\t' read -r login state oid has_phrase; do
+      --jq ".reviews[] | [.author.login, .state, (.commit.oid // \"\"), (((.body // \"\") | ascii_downcase) as \$b | (\$b | contains(\"$lphrase\")) and (\$b | contains(\"$laddress\")) | tostring)] | @tsv" 2>/dev/null || true)"
+  while IFS=$'\t' read -r login state oid called; do
     [ -n "$login" ] || continue
     [ "$state" != DISMISSED ] || continue
-    if [ "$state" != APPROVED ] && [ "$has_phrase" != true ]; then continue; fi
-    if ! printf '%s\n' "$maintainers" | has_line "$login"; then
-      ignored="${ignored:+$ignored; }nod from $login"
+    [ "$called" = true ] || continue
+    if ! printf '%s\n' "$smidir" | has_line "$login"; then
+      ignored="${ignored:+$ignored; }a call from $login"
       continue
     fi
     if [ "$oid" = "$head" ]; then
-      if [ "$state" = APPROVED ]; then
-        printf 'run\tapproved at %s by maintainer %s\n' "${oid:0:7}" "$login"
-      else
-        printf 'run\t"%s" at %s from maintainer %s\n' "$phrase" "${oid:0:7}" "$login"
-      fi
+      printf 'run\tcalled in by %s at %s\n' "$login" "${oid:0:7}"
       return 0
     fi
-    stale="${stale:+$stale; }$login approved ${oid:0:7}, head is ${head:0:7}"
+    stale="${stale:+$stale; }$login called ${oid:0:7} in"
   done <<< "$reviews"
-  why="needs a nod from a maintainer"
+  why="no one listed has called ${head:0:7} in"
   [ -n "$stale" ] && why="$why (stale: $stale)"
   [ -n "$ignored" ] && why="$why (ignored: $ignored)"
-  printf 'nod\t%s\n' "$why"
+  printf 'wait\t%s\n' "$why"
 }
 
 case "${1:-}" in
-  decide) shift; [ $# -eq 6 ] || die "gate decide <profile> <repo> <number> <author> <head_repo> <head>"; cmd_decide "$@" ;;
-  *) echo "usage: gate.sh decide <profile> <repo> <number> <author> <head_repo> <head>" >&2; exit 2 ;;
+  decide) shift; [ $# -eq 4 ] || die "gate decide <profile> <repo> <number> <head>"; cmd_decide "$@" ;;
+  *) echo "usage: gate.sh decide <profile> <repo> <number> <head>" >&2; exit 2 ;;
 esac

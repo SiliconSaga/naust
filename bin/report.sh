@@ -53,9 +53,10 @@ cmd_render() {
   done < "$job/steps.tsv"
   human="${human//- launch failed; see \`launch.log\`./- launch check failed: the game did not reach the renderer, or the screenshot is missing; read \`launch.log\`.}"
   human="${human//- reset failed; see \`reset.log\`./- reset failed: the bay is marked broken and nothing ran; read \`reset.log\`.}"
+  human="${human//- baseline failed; see \`baseline.log\`./- the base branch could not be tested in this bay, so the PR was not judged: the bay is marked broken; read \`baseline.log\`, fix the bay, reset it.}"
   human="${human//- tree failed; see \`tree.log\`./- the working tree is not clean after the run; see the clean-tree section.}"
   if grep -q '^head moved' "$job/checkout.log" 2>/dev/null; then
-    human="${human//- checkout failed; see \`checkout.log\`./- $(grep -m1 '^head moved' "$job/checkout.log"). Nothing was built; approve the new head to run it.}"
+    human="${human//- checkout failed; see \`checkout.log\`./- $(grep -m1 '^head moved' "$job/checkout.log"). Nothing was built; call the new head in to run it.}"
   fi
 
   # One read per directory, split on the first newline: piping cmd_junit into
@@ -99,7 +100,7 @@ cmd_render() {
     fi
   fi
 
-  local tree_section="" launch_section="" checks_line
+  local tree_section="" launch_section="" launch_status checks_line
   if [ -s "$job/tree.txt" ]; then
     tree_section="$(awk -F'\t' '{ printf "- %s: `%s` (%s)\n", $1, $2, $3 }' "$job/tree.txt")"
     if grep -q 'unexpected$' "$job/tree.txt"; then
@@ -108,19 +109,17 @@ cmd_render() {
   else
     tree_section="clean"
   fi
-  if [ -f "$job/screenshot.png" ]; then launch_section="screenshot: \`screenshot.png\` (attached on Discord; in the bay at \`$job/screenshot.png\`)"
-  else launch_section="no screenshot; last lines of \`launch.log\`:"$'\n\n```\n'"$(tail -n 5 "$job/launch.log" 2>/dev/null || true)"$'\n```'; fi
+  launch_status="$(awk -F'\t' '$2 == "launch" { print $3 }' "$job/steps.tsv")"
+  case "$launch_status" in skipped|"") launch_status="not run" ;; esac
+  if [ -f "$job/screenshot.png" ]; then launch_section="; screenshot: \`screenshot.png\` (attached on Discord; in the bay at \`$job/screenshot.png\`)"
+  elif [ "$launch_status" != "not run" ]; then launch_section="; no screenshot; last lines of \`launch.log\`:"$'\n\n```\n'"$(tail -n 5 "$job/launch.log" 2>/dev/null || true)"$'\n```'; fi
   checks_line="$(grep -m1 '^Checks:' "$job/checks.txt" 2>/dev/null || echo 'Checks: not read')"
   human="$human- Run the game and play the change; the boots only prove it starts."$'\n'
 
   cat > "$job/report.md" <<EOF
 # $repo#$number — ${head:0:7} onto $base, $bay
 
-Bay \`$bay\` at \`$job\`. Diff:
-
-\`\`\`
-$(cat "$job/diff-stat.txt" 2>/dev/null || echo "(no diff recorded)")
-\`\`\`
+Bay \`$bay\` at \`$job\`.
 
 ## Steps
 
@@ -130,8 +129,8 @@ $steps_rows
 $tests_section
 ## Boots
 
-- headless: $(awk -F'\t' '$2 == "headless" { print $3 }' "$job/steps.tsv")
-- launch: $(awk -F'\t' '$2 == "launch" { print $3 }' "$job/steps.tsv"); $launch_section
+- headless: $(awk -F'\t' '$2 == "headless" { print $3 }' "$job/steps.tsv" | sed 's/^skipped$/not run/')
+- launch: $launch_status$launch_section
 
 ## Clean tree
 

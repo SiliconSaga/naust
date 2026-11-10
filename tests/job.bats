@@ -18,6 +18,7 @@ case "$1 $2" in
   "build terasology") echo "build GH_TOKEN=${GH_TOKEN:-unset}" >> "$STUB_LOG"; exit "${WS_BUILD_EXIT:-0}" ;;
   "test terasology")
     [ -z "${WS_TEST_BROKEN:-}" ] || exit 1              # a run that produced nothing
+    [ -z "${WS_TEST_BROKEN_PR:-}" ] || [ "$(git -C "$comp" rev-parse --abbrev-ref HEAD)" != cr/7 ] || exit 1   # nothing, on the PR only
     [ -z "${WS_TEST_DROP_CR:-}" ] || git -C "$comp" branch -q -D cr/7 2>/dev/null   # the branch to return to is gone
     mkdir -p "$comp/engine-tests/build/test-results/unitTest"
     printf '<testsuite name="%s" tests="1" failures="0" errors="0" skipped="0"><testcase name="t" classname="%s"/></testsuite>\n' "${3:-all}" "${3:-all}" \
@@ -50,7 +51,7 @@ publish_bay_pr() {
 write_jobfile() { # <head>
     mkdir -p "$NAUST_DIR/state/jobs"
     JOBFILE="$NAUST_DIR/state/jobs/MovingBlocks__Terasology-7-${1:0:7}.job"
-    printf 'profile=terasology\nrepo=MovingBlocks/Terasology\nnumber=7\nhead=%s\nbase=develop\nauthor=Cervator\nhead_repo=Cervator/Terasology\npriority=0\nwith=\nbay=\nenqueued=1\n' "$1" > "$JOBFILE"
+    printf 'profile=terasology\nrepo=MovingBlocks/Terasology\nnumber=7\nhead=%s\nbase=develop\nauthor=Cervator\nhead_repo=Cervator/Terasology\npriority=0\nwith=\nbay=\ncomment=on\nenqueued=1\n' "$1" > "$JOBFILE"
     JOB="$BAY_DIR/.outputs/naust/MovingBlocks__Terasology-7-${1:0:7}"
 }
 
@@ -117,7 +118,7 @@ bay_state() { sed -n 's/^state=//p' "$NAUST_DIR/state/bays/bay-1.state"; }
     [ "$(grep -c '^review GH_TOKEN=tok$' "$STUB_LOG")" -eq 2 ]
     [ "$(grep -c '^ws bay exec --pass GH_TOKEN bay-1 review terasology' "$STUB_LOG")" -eq 2 ]
     grep -q '^ws bay exec bay-1 build terasology$' "$STUB_LOG"
-    ! grep -q 'leaked-from-the-tick' "$STUB_LOG"
+    run ! grep -q 'leaked-from-the-tick' "$STUB_LOG"
 }
 
 @test "a step the profile does not define is recorded as skipped, never as passed" {
@@ -127,7 +128,7 @@ bay_state() { sed -n 's/^state=//p' "$NAUST_DIR/state/bays/bay-1.state"; }
     [ "$(step_status 7)" = skipped ]
     [ "$(step_status 6)" = pass ]
     grep -q 'no .steps.launch in profile' "$JOB/launch.log"
-    ! grep -q '^launch-stub' "$STUB_LOG"
+    run ! grep -q '^launch-stub' "$STUB_LOG"
 }
 
 @test "a step whose command exits 75 has failed; only a key the profile lacks skips" {
@@ -147,7 +148,7 @@ bay_state() { sed -n 's/^state=//p' "$NAUST_DIR/state/bays/bay-1.state"; }
     [ "$(step_status 9)" = pass ]
     grep -q 'head moved' "$JOB/checkout.log"
     [ "$(sed -n 's/^head_fetched: //p' "$JOB/job.yaml")" = "$PR_SHA" ]
-    ! grep -q '^bayws build' "$STUB_LOG"
+    run ! grep -q '^bayws build' "$STUB_LOG"
     [ "$(bay_state)" = "free" ]                     # nothing was built, so nothing waits for a human
 }
 
@@ -159,25 +160,38 @@ bay_state() { sed -n 's/^state=//p' "$NAUST_DIR/state/bays/bay-1.state"; }
     for id in 3 4 5 5b 5c 6 7 8; do [ "$(step_status $id)" = skipped ]; done
 }
 
-@test "a test run that produces no reports does not pass" {
-    export WS_TEST_BROKEN=1
+@test "a test run on the PR that produces no reports does not pass" {
+    export WS_TEST_BROKEN_PR=1
     run_naust job bay-1 "$JOBFILE"
     [ "$status" -ne 0 ]
-    [ "$(step_status 4)" = fail ]
-    [ "$(step_status 5c)" = fail ]
+    [ "$(step_status 4)" = pass ]
     [ "$(step_status 5)" = pass ]
+    [ "$(step_status 5c)" = fail ]
+    [ "$(bay_state)" = "ready" ]
 }
 
-@test "a baseline that cannot return to the PR branch skips everything that would test the base instead" {
-    export WS_TEST_DROP_CR=1
+@test "a base branch that cannot be tested is the bay's fault, not the PR's: nothing reaches the PR and the bay is marked broken" {
+    export WS_TEST_BROKEN=1
     run_naust job bay-1 "$JOBFILE"
     [ "$status" -ne 0 ]
     [ "$(step_status 4)" = fail ]
     for id in 5 5b 5c 6 7 8; do [ "$(step_status $id)" = skipped ]; done
     [ "$(step_status 9)" = pass ]
+    run ! grep -q '^bayws build' "$STUB_LOG"
+    run ! grep -q '^bayws review terasology comment' "$STUB_LOG"
+    [ -f "$JOB/report.md" ]
+    [ "$(bay_state)" = "broken" ]
+}
+
+@test "a baseline that cannot return to the PR branch is a broken bay too" {
+    export WS_TEST_DROP_CR=1
+    run_naust job bay-1 "$JOBFILE"
+    [ "$status" -ne 0 ]
+    [ "$(step_status 4)" = fail ]
+    for id in 5 5b 5c 6 7 8; do [ "$(step_status $id)" = skipped ]; done
     grep -q 'cannot return to cr/7' "$JOB/baseline.log"
-    ! grep -q '^bayws build' "$STUB_LOG"
-    [ "$(bay_state)" = "free" ]                     # the tree sits on the base, not the PR: nothing to judge
+    run ! grep -q '^bayws review terasology comment' "$STUB_LOG"
+    [ "$(bay_state)" = "broken" ]
 }
 
 @test "a PR comment that cannot be posted fails the report step, and the job record still lands" {
@@ -194,7 +208,7 @@ bay_state() { sed -n 's/^state=//p' "$NAUST_DIR/state/bays/bay-1.state"; }
 @test "the reset keeps the bay busy with this job, so nothing can claim it before the job goes on" {
     run_naust job bay-1 "$JOBFILE"
     [ "$status" -eq 0 ]
-    ! grep -q '^ws bay set' "$STUB_LOG"
+    run ! grep -q '^ws bay set' "$STUB_LOG"
     [ "$(sed -n 's/^job=//p' "$NAUST_DIR/state/bays/bay-1.state")" = "MovingBlocks__Terasology-7-${PR_SHA:0:7}" ]
 }
 
@@ -220,10 +234,13 @@ bay_state() { sed -n 's/^state=//p' "$NAUST_DIR/state/bays/bay-1.state"; }
     [ "$(bay_state)" = "broken" ]
 }
 
-@test "report.comment off posts nothing on the PR" {
-    yq -i '.report.comment = "off"' "$NAUST_WORKSPACE/realms/realm-test/naust/terasology.yaml"
+@test "a job queued without comment posts nothing on the PR, whatever the profile says" {
+    sed -i 's/^comment=on$/comment=off/' "$JOBFILE"
     run_naust job bay-1 "$JOBFILE"
-    ! grep -q '^bayws review terasology comment' "$STUB_LOG"
+    [ "$status" -eq 0 ]
+    run ! grep -q '^bayws review terasology comment' "$STUB_LOG"
+    grep -q '^bayws review terasology checks' "$STUB_LOG"
+    [ "$(bay_state)" = "ready" ]
 }
 
 @test "with targets are checked out too and recorded" {

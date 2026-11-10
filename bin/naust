@@ -8,13 +8,14 @@ usage() {
   cat <<'USAGE'
 Usage: naust <command> [args]
 
-  tick                         poll, gate, queue, run one job, exit (the scheduled entry point)
+  tick                         poll for calls, queue, run one job, exit (the scheduled entry point)
   bay add <name> --profile <p> make a bay (ws bay add, then warm it for the profile)
   bay reset <name> [--deep]    reset a bay to base; --deep also drops Gradle outputs
   bay list                     every bay with its state
   bay release <name>           hand a ready or held bay back to the pool
-  dock <profile> <n> [--with <target>#<n>]... [--bay <name>]
-                               queue a PR by hand, ahead of polled ones
+  dock <profile> <n> [--with <target>#<n>]... [--bay <name>] [--comment] [--queue]
+                               bring a PR into a bay now and print its report;
+                               --comment posts it to the PR too, --queue leaves it for the tick
   report render <jobdir>       re-render a job's report.md and comment.md
   notify say <text> [--file <path>]
                                post to the Discord webhook
@@ -27,7 +28,7 @@ USAGE
 cmd="${1:-}"
 case "$cmd" in
   ""|-h|--help|help) usage; exit 0 ;;
-  tick|bay|dock|job|report|notify|gate|poll|queue)
+  tick|bay|dock|job|run|report|notify|gate|poll|queue)
     shift
     exec bash "$HERE/$cmd.sh" "$@" ;;
   *) echo "naust: unknown command '$cmd'" >&2; usage >&2; exit 2 ;;

@@ -44,13 +44,18 @@ _yq_list() { # <file> <path>
   [ -f "$1" ] || return 0
   yq "($2 // [])[]" "$1" || die "cannot read $2 from $1"
 }
+# A YAML map's keys, one per line (empty when absent).
+_yq_keys() { # <file> <path>
+  [ -f "$1" ] || return 0
+  yq "($2 // {}) | keys | .[]" "$1" || die "cannot read $2 from $1"
+}
 
 cfg() { _yq_scalar "$NAUST_CONFIG" "$1" "${2:-}"; }
 cfg_list() { _yq_list "$NAUST_CONFIG" "$1"; }
 prof() { _yq_scalar "$PROFILE_DIR/$1.yaml" "$2" "${3:-}"; }
 prof_list() { _yq_list "$PROFILE_DIR/$1.yaml" "$2"; }
 trust() { _yq_scalar "$PROFILE_DIR/trust.yaml" ".$1$2" "${3:-}"; }
-trust_list() { _yq_list "$PROFILE_DIR/trust.yaml" ".$1$2"; }
+trust_keys() { _yq_keys "$PROFILE_DIR/trust.yaml" ".$1$2"; }
 adapter() { _yq_scalar "$ADAPTER_DIR/$1.yaml" "$2" "${3:-}"; }
 adapter_list() { _yq_list "$ADAPTER_DIR/$1.yaml" "$2"; }
 

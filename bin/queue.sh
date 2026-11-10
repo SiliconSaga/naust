@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # The job queue: one key=value file per pull request under state/queue/.
 #
-#   queue.sh put <profile> <repo> <number> <head> <base> <author> <head_repo> [--priority N] [--with <csv>] [--bay <name>]
+#   queue.sh put <profile> <repo> <number> <head> <base> <author> <head_repo> [--priority N] [--with <csv>] [--bay <name>] [--comment on|off]
 #   queue.sh next        queue.sh order        queue.sh drop <path>        queue.sh list
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -16,32 +16,36 @@ job_path() { printf '%s/queue/%s__%s.job\n' "$STATE_DIR" "${1//\//__}" "$2"; }
 cmd_put() {
   local profile="$1" repo="$2" number="$3" head="$4" base="$5" author="$6" head_repo="$7"
   shift 7
-  local priority=0 with="" bay="" f
+  local priority=0 with="" bay="" comment=off f
   while [ $# -gt 0 ]; do
     case "$1" in
       --priority) priority="$2"; shift 2 ;;
       --with) with="$2"; shift 2 ;;
       --bay) bay="$2"; shift 2 ;;
+      --comment) comment="$2"; shift 2 ;;
       *) die "queue put: unknown argument '$1'" ;;
     esac
   done
+  case "$comment" in on|off) ;; *) die "queue put: --comment takes on or off, not '$comment'" ;; esac
   f="$(job_path "$repo" "$number")"
   if [ -f "$f" ] && [ "$(kv_get "$f" head)" = "$head" ]; then
     # The same head again: keep its place in the queue, but an operator's
     # `naust dock` on top of a polled entry must not be lost. Priority only
     # rises; a named target or bay replaces an absent one; the base follows
-    # the PR, since it can be retargeted while it waits.
+    # the PR, since it can be retargeted while it waits; a job once allowed
+    # to comment keeps that, whoever re-puts it.
     local changed=""
     if [ -n "$base" ] && [ "$base" != "$(kv_get "$f" base)" ]; then kv_set "$f" base "$base"; changed="$changed base=$base"; fi
     if [ "$priority" -gt "$(kv_get "$f" priority)" ]; then kv_set "$f" priority "$priority"; changed="$changed priority=$priority"; fi
     if [ -n "$with" ] && [ "$with" != "$(kv_get "$f" with)" ]; then kv_set "$f" with "$with"; changed="$changed with=$with"; fi
     if [ -n "$bay" ] && [ "$bay" != "$(kv_get "$f" bay)" ]; then kv_set "$f" bay "$bay"; changed="$changed bay=$bay"; fi
+    if [ "$comment" = on ] && [ "$(kv_get "$f" comment)" != on ]; then kv_set "$f" comment on; changed="$changed comment=on"; fi
     log "queue: $repo#$number at ${head:0:7} already queued${changed:+; updated:$changed}"
     return 0
   fi
   [ -f "$f" ] && log "queue: $repo#$number moved to ${head:0:7}, replacing the queued head"
-  printf 'profile=%s\nrepo=%s\nnumber=%s\nhead=%s\nbase=%s\nauthor=%s\nhead_repo=%s\npriority=%s\nwith=%s\nbay=%s\nenqueued=%s\n' \
-    "$profile" "$repo" "$number" "$head" "$base" "$author" "$head_repo" "$priority" "$with" "$bay" "$(now)" > "$f"
+  printf 'profile=%s\nrepo=%s\nnumber=%s\nhead=%s\nbase=%s\nauthor=%s\nhead_repo=%s\npriority=%s\nwith=%s\nbay=%s\ncomment=%s\nenqueued=%s\n' \
+    "$profile" "$repo" "$number" "$head" "$base" "$author" "$head_repo" "$priority" "$with" "$bay" "$comment" "$(now)" > "$f"
   log "queue: $repo#$number at ${head:0:7} queued (priority $priority)"
 }
 

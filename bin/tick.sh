@@ -1,76 +1,47 @@
 #!/usr/bin/env bash
-# One tick: poll, gate, queue, notify, run at most one job, exit. The OS
-# scheduler calls this every few minutes; the lock makes overlapping ticks
-# harmless and a crashed tick's lock is reclaimed after LOCK_STALE_HOURS.
+# One tick: poll, gate, queue, run at most one job, exit. The OS scheduler
+# calls this every few minutes; the lock makes overlapping ticks harmless and
+# a crashed tick's lock is reclaimed after LOCK_STALE_HOURS.
+#
+# Nothing runs unasked: a PR is queued only once someone the realm lists has
+# called it into this naust by name, in a review on the PR. A job the tick
+# starts reports back where the call came from, as a comment on the PR, when
+# the profile allows it.
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=bin/lib.sh
 . "$HERE/lib.sh"
 load_config
 gh_auth
-JOB_SCRIPT="${NAUST_JOB_SCRIPT:-$HERE/job.sh}"
 
 if ! with_lock; then
   log "tick: another tick holds $STATE_DIR/lock; nothing to do"
   exit 0
 fi
 
+# The calls this naust answers are addressed to its account, and its reports
+# post as the token's owner. Those must be the same login, or a review meant
+# for one yard would be answered by another under a different name.
+account="$(cfg .account)"
+[ -n "$account" ] || die "account: is not set in $NAUST_CONFIG; naust cannot tell which calls are for it"
+login="$(gh api user --jq .login 2>/dev/null || true)"
+[ "$login" = "$account" ] || die "NAUST_GITHUB_TOKEN belongs to '${login:-nobody gh can name}', not to the configured account '$account'"
+
 while IFS= read -r profile; do
   [ -n "$profile" ] || continue
-  while IFS=$'\t' read -r p repo number sha base author head_repo; do
+  while IFS=$'\t' read -r p repo number sha base author head_repo updated; do
     [ -n "$number" ] || continue
-    IFS=$'\t' read -r decision reason < <(bash "$HERE/gate.sh" decide "$p" "$repo" "$number" "$author" "$head_repo" "$sha")
+    IFS=$'\t' read -r decision reason < <(bash "$HERE/gate.sh" decide "$p" "$repo" "$number" "$sha")
     if [ "$decision" = run ]; then
-      bash "$HERE/queue.sh" put "$p" "$repo" "$number" "$sha" "$base" "$author" "$head_repo"
+      bash "$HERE/queue.sh" put "$p" "$repo" "$number" "$sha" "$base" "$author" "$head_repo" --comment "$(prof "$p" .report.comment on)"
       bash "$HERE/poll.sh" mark "$p" "$number" queued "$sha"
       log "tick: $repo#$number queued ($reason)"
     else
-      seen="$STATE_DIR/seen/${repo//\//__}/$number"
-      # Marked notified only once the notice went out, so a webhook that was
-      # down is tried again next tick rather than the PR waiting unheard.
-      if [ "$(kv_get "$seen" notified)" != "$sha" ]; then
-        if bash "$HERE/notify.sh" say "PR #$number on $repo by @$author at ${sha:0:7} needs a nod before a bay runs it: a maintainer's Approve, or a review saying \"$(trust "$p" .nod_phrase 'haul it in')\". https://github.com/$repo/pull/$number ($reason)"; then
-          bash "$HERE/poll.sh" mark "$p" "$number" notified "$sha"
-        else
-          log "tick: the notice for $repo#$number did not go out; trying again next tick"
-        fi
-      fi
+      bash "$HERE/poll.sh" mark "$p" "$number" gated "$updated"
       log "tick: $repo#$number waiting ($reason)"
     fi
   done < <(bash "$HERE/poll.sh" candidates "$profile")
 done < <(cfg_list .profiles)
 
-# The first job in queue order that can have a bay runs; one that cannot (its
-# pinned bay is held, or its profile has no free bay) stays queued and does
-# not hold the ones behind it.
-job=""
-while IFS= read -r cand; do
-  [ -n "$cand" ] || continue
-  profile="$(kv_get "$cand" profile)"
-  repo="$(kv_get "$cand" repo)"; number="$(kv_get "$cand" number)"; head="$(kv_get "$cand" head)"
-  jobid="${repo//\//__}-$number-${head:0:7}"
-  bay="$(kv_get "$cand" bay)"
-  if [ -z "$bay" ]; then
-    bay="$(bash "$HERE/bay.sh" free-for "$profile")" || { log "tick: no free bay for $profile; $repo#$number stays queued"; continue; }
-  else
-    # A pinned bay is run as its own profile's, so a bay of another profile
-    # would run the PR against the wrong component and commands.
-    bay_profile="$(bash "$HERE/bay.sh" list | awk -F'\t' -v b="$bay" '$1 == b { print $3 }')"
-    if [ "$bay_profile" != "$profile" ]; then
-      log "tick: bay $bay belongs to ${bay_profile:-no profile}, not $profile; $repo#$number stays queued"
-      continue
-    fi
-  fi
-  if bash "$HERE/bay.sh" claim "$bay" "$jobid"; then job="$cand"; break; fi
-  log "tick: bay $bay is not free; $repo#$number stays queued"
-done < <(bash "$HERE/queue.sh" order)
-[ -n "$job" ] || { log "tick: nothing to run"; exit 0; }
-run="$STATE_DIR/jobs/$jobid.job"
-mv "$job" "$run"
-log "tick: running $jobid in $bay"
-if bash "$JOB_SCRIPT" "$bay" "$run"; then
-  log "tick: $jobid finished"
-else
-  log "tick: $jobid finished with failures (see the report)"
-fi
+bash "$HERE/run.sh" next > /dev/null || true
 exit 0

@@ -40,6 +40,18 @@ put() { run_naust queue put terasology MovingBlocks/Terasology "$@"; }
     grep -q 'base=main' "$NAUST_LOG"
 }
 
+@test "put records whether the job may comment on the PR, and on is never lowered to off" {
+    put 7 abc123 develop stranger stranger/Terasology
+    f="$NAUST_DIR/state/queue/MovingBlocks__Terasology__7.job"
+    grep -q '^comment=off$' "$f"
+    put 7 abc123 develop stranger stranger/Terasology --comment on
+    grep -q '^comment=on$' "$f"
+    put 7 abc123 develop stranger stranger/Terasology --comment off
+    grep -q '^comment=on$' "$f"
+    put 8 abc123 develop stranger stranger/Terasology --comment maybe
+    [ "$status" -ne 0 ]
+}
+
 @test "order lists every job the way next picks them; next is the first" {
     NAUST_NOW=100 put 1 a develop x x/y
     NAUST_NOW=200 put 2 b develop x x/y --priority 5
