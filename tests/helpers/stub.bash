@@ -104,7 +104,7 @@ report:
 YAML
   cat > "$WORKSPACE/realms/realm-test/naust/trust.yaml" <<'YAML'
 terasology:
-  smidir:
+  forges:
     Cervator: agent-refr
     jdrueckert: ~
   nod_phrase: "haul it in"

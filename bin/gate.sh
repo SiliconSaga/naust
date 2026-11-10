@@ -7,7 +7,7 @@
 # Prints "run<TAB>reason" or "wait<TAB>reason". Nothing runs unasked. A call
 # is a review on the PR whose text says the realm's phrase addressed to this
 # naust's machine account ("@agent-refr haul it in"), from a login the realm
-# lists as a smiðr. GitHub records the commit every review was submitted
+# lists under forges. GitHub records the commit every review was submitted
 # against, so a call admits that commit and no other; a push after it needs
 # a new call. A review aimed at another naust's account is not for this one.
 # Approvals are a verdict on the code, not a request to run it, and labels
@@ -28,10 +28,10 @@ jq_literal() { local s="$1"; s="${s//\\/\\\\}"; s="${s//\"/\\\"}"; printf '%s' "
 
 cmd_decide() {
   local profile="$1" repo="$2" number="$3" head="$4"
-  local account smidir phrase lphrase laddress reviews login state oid called ignored="" stale="" why
+  local account forges phrase lphrase laddress reviews login state oid called ignored="" stale="" why
   account="$(cfg .account)"
   [ -n "$account" ] || die "account: is not set in $NAUST_CONFIG; naust cannot tell which calls are for it"
-  smidir="$(trust_keys "$profile" .smidir)"
+  forges="$(trust_keys "$profile" .forges)"
   phrase="$(trust "$profile" .nod_phrase 'haul it in')"
   lphrase="$(jq_literal "$(printf '%s' "$phrase" | tr '[:upper:]' '[:lower:]')")"
   laddress="$(jq_literal "@$(printf '%s' "$account" | tr '[:upper:]' '[:lower:]')")"
@@ -41,7 +41,7 @@ cmd_decide() {
     [ -n "$login" ] || continue
     [ "$state" != DISMISSED ] || continue
     [ "$called" = true ] || continue
-    if ! printf '%s\n' "$smidir" | has_line "$login"; then
+    if ! printf '%s\n' "$forges" | has_line "$login"; then
       ignored="${ignored:+$ignored; }a call from $login"
       continue
     fi
