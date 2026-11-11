@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="org.x.BTest" tests="2" skipped="0" failures="1" errors="0" timestamp="2026-10-08T00:00:00" time="0.1">
+  <testcase name="ok" classname="org.x.BTest" time="0.01"/>
+  <testcase name="broken" classname="org.x.BTest" time="0.01">
+    <failure message="expected 1 but was 2" type="AssertionError">stack</failure>
+  </testcase>
+</testsuite>

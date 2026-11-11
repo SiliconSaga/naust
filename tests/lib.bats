@@ -1,0 +1,173 @@
+#!/usr/bin/env bats
+load helpers/stub
+
+setup() { naust_setup; }
+
+lib() { run bash -c "source '$(dirname "$NAUST")/lib.sh'; $*"; }
+
+@test "naust --help lists the commands" {
+    run_naust --help
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"tick"*"bay"*"dock"* ]]
+}
+
+@test "load_config finds the workspace, the realm and the state under bays/.naust" {
+    lib 'load_config; echo "$WORKSPACE|$REALM|$STATE_DIR|$PROFILE_DIR|$ADAPTER_DIR"'
+    [ "$status" -eq 0 ]
+    [ "$output" = "$NAUST_WORKSPACE|realm-test|$NAUST_DIR/state|$NAUST_WORKSPACE/realms/realm-test/naust|$NAUST_WORKSPACE/realms/realm-test/adapters" ]
+    for d in queue seen jobs bays; do [ -d "$NAUST_DIR/state/$d" ]; done
+}
+
+@test "load_config takes the realm from naust.yaml over the workspace's active one" {
+    mkdir -p "$NAUST_WORKSPACE/realms/other/naust"
+    printf 'realm: other\nprofiles: []\n' > "$NAUST_CONFIG"
+    lib 'load_config; echo "$REALM"'
+    [ "$output" = "other" ]
+}
+
+@test "load_config fails without a workspace ws or a realm" {
+    rm "$NAUST_WORKSPACE/scripts/ws"
+    lib 'load_config'
+    [ "$status" -ne 0 ]
+    grep -q "no scripts/ws" "$NAUST_LOG"
+    naust_setup
+    printf '{}\n' > "$NAUST_WORKSPACE/ecosystem.local.yaml"
+    lib 'load_config'
+    [ "$status" -ne 0 ]
+    grep -q "realm is required" "$NAUST_LOG"
+}
+
+@test "prof, trust and adapter read the realm files with defaults" {
+    lib 'load_config; prof terasology .repo; prof terasology .missing fallback; trust terasology .nod_phrase; adapter terasology .provision.init; adapter_list terasology .provision.runtime_dirs'
+    [ "$status" -eq 0 ]
+    [ "${lines[0]}" = "MovingBlocks/Terasology" ]
+    [ "${lines[1]}" = "fallback" ]
+    [ "${lines[2]}" = "haul it in" ]
+    [ "${lines[3]}" = "groovyw-stub module init omega" ]
+    [ "${lines[4]}" = "logs" ]
+    [ "${lines[6]}" = "terasology-server" ]
+}
+
+@test "env_value reads the workspace .env literally and never evaluates it" {
+    printf 'export NAUST_DISCORD_WEBHOOK="https://example.invalid/$(touch %s/boom)"\n' "$BATS_TEST_TMPDIR" > "$NAUST_ENV_FILE"
+    lib 'env_value NAUST_DISCORD_WEBHOOK'
+    [ "$status" -eq 0 ]
+    [[ "$output" == 'https://example.invalid/$(touch '* ]]
+    [ ! -e "$BATS_TEST_TMPDIR/boom" ]
+}
+
+@test "bay_ws goes through the parent's ws bay exec" {
+    lib 'load_config; bay_ws bay-9 build terasology'
+    [ "$status" -eq 0 ]
+    grep -q '^ws bay exec bay-9 build terasology$' "$STUB_LOG"
+}
+
+@test "bay_ws never passes an inherited GH_TOKEN; only a caller that asks for it does" {
+    # The parent's scrub only unsets what the bay's .env defines, so the
+    # token must be gone from the environment before ws is even reached.
+    # gh reads GITHUB_TOKEN as well as GH_TOKEN, so the alias goes too, on
+    # every call: only GH_TOKEN is ever passed on purpose.
+    printf '#!/usr/bin/env bash\necho "ws GH_TOKEN=${GH_TOKEN:-unset} GITHUB_TOKEN=${GITHUB_TOKEN:-unset} $*" >> "$STUB_LOG"\n' > "$NAUST_WORKSPACE/scripts/ws"
+    export GH_TOKEN=inherited-from-the-shell GITHUB_TOKEN=alias-from-the-shell
+    lib 'load_config; bay_ws bay-9 build terasology; NAUST_PASS_GH_TOKEN=1 bay_ws bay-9 review terasology comment 7'
+    [ "$status" -eq 0 ]
+    grep -q '^ws GH_TOKEN=unset GITHUB_TOKEN=unset bay exec bay-9 build terasology$' "$STUB_LOG"
+    grep -q '^ws GH_TOKEN=inherited-from-the-shell GITHUB_TOKEN=unset bay exec --pass GH_TOKEN bay-9 review terasology comment 7$' "$STUB_LOG"
+}
+
+@test "a config yq cannot parse is an error, not an empty config" {
+    printf 'realm: realm-test\nprofiles: [\n' > "$NAUST_CONFIG"
+    lib 'load_config; cfg_list .profiles; echo reached'
+    [ "$status" -ne 0 ]
+    [[ "$output" != *"reached"* ]]
+    grep -q "naust.yaml" "$NAUST_LOG"
+}
+
+@test "lock_stale_hours must be a whole number of hours" {
+    printf 'realm: realm-test\nprofiles: []\nlock_stale_hours: six\n' > "$NAUST_CONFIG"
+    lib 'load_config'
+    [ "$status" -ne 0 ]
+    grep -q "lock_stale_hours" "$NAUST_LOG"
+}
+
+@test "lock_stale_hours reads a leading zero as decimal and refuses a number that would overflow the seconds" {
+    printf 'realm: realm-test\nprofiles: []\nlock_stale_hours: "08"\n' > "$NAUST_CONFIG"
+    lib 'load_config; echo "$LOCK_STALE_HOURS"'
+    [ "$status" -eq 0 ]
+    [ "$output" = "8" ]
+    printf 'realm: realm-test\nprofiles: []\nlock_stale_hours: 99999999999999999999\n' > "$NAUST_CONFIG"
+    lib 'load_config'
+    [ "$status" -ne 0 ]
+    grep -q "lock_stale_hours" "$NAUST_LOG"
+}
+
+@test "kv_set and kv_get round-trip and overwrite" {
+    f="$BATS_TEST_TMPDIR/kv"
+    lib "kv_set '$f' state free; kv_set '$f' job none; kv_set '$f' state busy; kv_get '$f' state; kv_get '$f' job; kv_get '$f' absent"
+    [ "$status" -eq 0 ]
+    [ "${lines[0]}" = "busy" ]
+    [ "${lines[1]}" = "none" ]
+    [ "${#lines[@]}" -eq 2 ]
+}
+
+@test "with_lock is exclusive and a stale lock is reclaimed" {
+    lib 'load_config; with_lock && echo first'
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"first"* ]]
+    mkdir -p "$NAUST_DIR/state/lock"
+    printf '%s\n' 1 > "$NAUST_DIR/state/lock/pid"
+    lib 'load_config; if with_lock; then echo got; else echo busy; fi'
+    [[ "$output" == *"busy"* ]]
+    touch -d '@1759970000' "$NAUST_DIR/state/lock"
+    lib 'load_config; if with_lock; then echo got; else echo busy; fi'
+    [[ "$output" == *"got"* ]]
+}
+
+@test "with_lock treats a lock whose age cannot be read as fresh" {
+    make_stub stat 'exit 1'
+    mkdir -p "$NAUST_DIR/state/lock"
+    printf '%s\n' 1 > "$NAUST_DIR/state/lock/pid"
+    lib 'load_config; if with_lock; then echo got; else echo busy; fi'
+    [[ "$output" == *"busy"* ]]
+}
+
+@test "with_lock never reclaims a stale-looking lock whose tick is still running" {
+    mkdir -p "$NAUST_DIR/state/lock"
+    printf '%s\n' "$$" > "$NAUST_DIR/state/lock/pid"       # this very process: alive
+    touch -d '@1759970000' "$NAUST_DIR/state/lock"
+    lib 'load_config; if with_lock; then echo got; else echo busy; fi'
+    [[ "$output" == *"busy"* ]]
+    grep -q "still running" "$NAUST_LOG"
+    [ -f "$NAUST_DIR/state/lock/pid" ]
+}
+
+@test "with_lock releases only a lock it still owns" {
+    lib 'load_config; with_lock; printf 4242 > "$STATE_DIR/lock/pid"'
+    [ "$status" -eq 0 ]
+    [ -d "$NAUST_DIR/state/lock" ]             # another tick reclaimed and took it; not ours to remove
+    rm -rf "$NAUST_DIR/state/lock"
+    lib 'load_config; with_lock'
+    [ ! -e "$NAUST_DIR/state/lock" ]
+}
+
+@test "gh_auth fails without the machine token rather than borrowing another account's" {
+    lib 'gh_auth'
+    [ "$status" -ne 0 ]
+    grep -q "NAUST_GITHUB_TOKEN" "$NAUST_LOG"
+    printf 'NAUST_GITHUB_TOKEN=tok\n' > "$NAUST_ENV_FILE"
+    lib 'gh_auth; echo "$GH_TOKEN"'
+    [ "$status" -eq 0 ]
+    [ "$output" = "tok" ]
+}
+
+@test "json_escape handles quotes, backslashes and newlines" {
+    lib "json_escape \$'a \"b\" \\\\ c\nd'"
+    [ "$status" -eq 0 ]
+    [ "$output" = 'a \"b\" \\ c\nd' ]
+}
+
+@test "json_escape escapes every control character, not only the named ones" {
+    lib "json_escape \$'a\x01b\x0cc\x1fd'"
+    [ "$status" -eq 0 ]
+    [ "$output" = 'a\u0001b\u000cc\u001fd' ]
+}
