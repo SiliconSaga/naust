@@ -35,7 +35,19 @@ export NAUST_JOB_DIR="$JOB" NAUST_PR_NUMBER="$number" NAUST_PR_HEAD="$head"
 
 FAILED=0
 HEAD_MOVED=0
+CHECKOUT_FAILED=0   # the PR never reached the tree: nothing in the bay is worth a look
 BASELINE_FAILED=0   # the base could not be tested here: the bay cannot judge the PR, and nothing after may run
+
+# What the job knows about itself, for the report. Written before the first
+# step so a reset or checkout that fails still leaves a report with a
+# header; the checkout rewrites it with what the fetch found.
+write_job_yaml() { # [<merge base> [<fetched head>]]
+  {
+    printf 'repo: %s\nnumber: %s\nhead: %s\nbase: %s\nmerge_base: %s\n' "$repo" "$number" "$head" "$base" "${1:-}"
+    printf 'author: %s\nhead_repo: %s\nwith: %s\nbay: %s\nstarted: %s\n' "$author" "$head_repo" "$with" "$BAY" "$STARTED"
+    [ -z "${2:-}" ] || [ "$2" = "$head" ] || printf 'head_fetched: %s\n' "$2"
+  } > "$JOB/job.yaml"
+}
 record() { printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" >> "$STEPS"; }
 skip() { record "$1" "$2" skipped 0; }
 skip_all() { local s; for s in "$@"; do skip "${s%% *}" "${s#* }"; done; }   # "<id> <name>" pairs
@@ -93,11 +105,7 @@ step_checkout() {
   git -C "$NAUST_COMP_DIR" fetch -q "$remote" "$base" || { echo "cannot fetch base branch $base from $remote"; return 1; }
   HEAD_SHA="$(git -C "$NAUST_COMP_DIR" rev-parse HEAD)" || return 1
   MERGE_BASE="$(git -C "$NAUST_COMP_DIR" merge-base HEAD "$remote/$base")" || { echo "no merge base between the change request and $remote/$base"; return 1; }
-  {
-    printf 'repo: %s\nnumber: %s\nhead: %s\nbase: %s\nmerge_base: %s\n' "$repo" "$number" "$head" "$base" "$MERGE_BASE"
-    printf 'author: %s\nhead_repo: %s\nwith: %s\nbay: %s\nstarted: %s\n' "$author" "$head_repo" "$with" "$BAY" "$(now)"
-    [ "$HEAD_SHA" = "$head" ] || printf 'head_fetched: %s\n' "$HEAD_SHA"
-  } > "$JOB/job.yaml"
+  write_job_yaml "$MERGE_BASE" "$HEAD_SHA"
   if [ "$HEAD_SHA" != "$head" ]; then
     echo "head moved: the job was given $head, the fetch returned $HEAD_SHA; the new head needs to be called in on its own"
     HEAD_MOVED=1
@@ -111,8 +119,15 @@ add_class() { # <path relative to the component>
   if grep -qE '@Tag\("(MteTest|TteTest)"\)' "$NAUST_COMP_DIR/$1" 2>/dev/null; then task=integrationTest; fi
   printf 'class %s %s\n' "$name" "$task" >> "$JOB/scope.txt"
 }
+# Every test class of module <name>, for a module whose source or whose own
+# change request is in play.
+add_module_tests() { # <module name>
+  local t
+  while IFS= read -r -d '' t; do add_class "${t#"$NAUST_COMP_DIR"/}"; done \
+    < <(find "$NAUST_COMP_DIR/modules/$1/src/test/java" -name '*Test.java' -print0 2>/dev/null)
+}
 step_scope() {
-  local f mod t default=no
+  local f mod w target default=no
   git -C "$NAUST_COMP_DIR" diff --name-only "$MERGE_BASE" HEAD > "$JOB/diff.txt"
   git -C "$NAUST_COMP_DIR" diff --stat "$MERGE_BASE" HEAD > "$JOB/diff-stat.txt"
   : > "$JOB/scope.txt"
@@ -122,10 +137,17 @@ step_scope() {
       engine/src/main/*|engine-tests/src/main/*|build-logic/*|*.gradle.kts|gradle/*|facades/*) default=yes ;;
       modules/*/src/main/*)
         mod="${f#modules/}"; mod="${mod%%/*}"
-        while IFS= read -r -d '' t; do add_class "${t#"$NAUST_COMP_DIR"/}"; done \
-          < <(find "$NAUST_COMP_DIR/modules/$mod/src/test/java" -name '*Test.java' -print0 2>/dev/null) ;;
+        add_module_tests "$mod" ;;
     esac
   done < "$JOB/diff.txt"
+  # A linked module change request is not in the engine's diff, so its
+  # module's tests are brought in whole.
+  for w in ${with//,/ }; do
+    target="${w%#*}"
+    case "$target" in
+      "$COMP"/modules/*) mod="${target#"$COMP"/modules/}"; add_module_tests "${mod%%/*}" ;;
+    esac
+  done
   [ "$default" = yes ] && echo default >> "$JOB/scope.txt"
   sort -u "$JOB/scope.txt" -o "$JOB/scope.txt"
   [ -s "$JOB/scope.txt" ] || echo default > "$JOB/scope.txt"
@@ -170,7 +192,7 @@ run_scope() { # <dest>
 # nothing it would say reaches the PR.
 step_baseline() {
   local rc=0
-  git -C "$NAUST_COMP_DIR" switch -q --detach "$MERGE_BASE" || { BASELINE_FAILED=1; return 1; }
+  git -C "$NAUST_COMP_DIR" switch -q --detach "$MERGE_BASE" || { echo "cannot switch the tree to the merge base $MERGE_BASE"; BASELINE_FAILED=1; return 1; }
   run_scope "$JOB/baseline" || rc=1
   git -C "$NAUST_COMP_DIR" switch -q "cr/$number" || { echo "cannot return to cr/$number; the tree is on the merge base"; rc=1; }
   [ "$rc" -eq 0 ] || BASELINE_FAILED=1
@@ -229,6 +251,8 @@ step_report() {
 
 mkdir -p "$JOB"
 : > "$STEPS"
+STARTED="$(now)"
+write_job_yaml
 log "job $JOBID: $repo#$number by $author in $BAY"
 if run_step 1 reset step_reset; then
   if run_step 2 checkout step_checkout; then
@@ -246,6 +270,7 @@ if run_step 1 reset step_reset; then
     fi
     [ "$BASELINE_FAILED" -eq 1 ] || run_step 8 tree step_tree || true
   else
+    CHECKOUT_FAILED=1
     skip_all "3 scope" "4 baseline" "5 build" "5b compile-all" "5c tests" "6 headless" "7 launch" "8 tree"
   fi
 else
@@ -254,13 +279,13 @@ fi
 run_step 9 report step_report || true
 # A bay with a finished job waits for a human. A broken reset keeps the bay
 # broken, and a base that would not test marks it so: an operator reads
-# baseline.log and resets it. A head that moved before anything was built
-# leaves no PR to look at, so that bay goes straight back to the pool.
+# baseline.log and resets it. A head that moved, or a checkout that failed,
+# leaves no PR tree to look at, so that bay goes straight back to the pool.
 if [ "$(bash "$HERE/bay.sh" list | awk -F'\t' -v b="$BAY" '$1 == b { print $2 }')" != broken ]; then
   if [ "$BASELINE_FAILED" -eq 1 ]; then
     bash "$HERE/bay.sh" set "$BAY" broken
     log "job $JOBID: the base branch could not be tested in $BAY; bay marked broken, nothing posted"
-  elif [ "$HEAD_MOVED" -eq 1 ]; then
+  elif [ "$HEAD_MOVED" -eq 1 ] || [ "$CHECKOUT_FAILED" -eq 1 ]; then
     bash "$HERE/bay.sh" set "$BAY" free
   else
     bash "$HERE/bay.sh" set "$BAY" ready

@@ -25,7 +25,9 @@ fi
 account="$(cfg .account)"
 [ -n "$account" ] || die "account: is not set in $NAUST_CONFIG; naust cannot tell which calls are for it"
 login="$(gh api user --jq .login 2>/dev/null || true)"
-[ "$login" = "$account" ] || die "NAUST_GITHUB_TOKEN belongs to '${login:-nobody gh can name}', not to the configured account '$account'"
+# GitHub logins are one name whatever their case, so the comparison is too.
+[ "$(printf '%s' "$login" | tr '[:upper:]' '[:lower:]')" = "$(printf '%s' "$account" | tr '[:upper:]' '[:lower:]')" ] \
+  || die "NAUST_GITHUB_TOKEN belongs to '${login:-nobody gh can name}', not to the configured account '$account'"
 
 while IFS= read -r profile; do
   [ -n "$profile" ] || continue
@@ -36,6 +38,10 @@ while IFS= read -r profile; do
       bash "$HERE/queue.sh" put "$p" "$repo" "$number" "$sha" "$base" "$author" "$head_repo" --comment "$(prof "$p" .report.comment on)"
       bash "$HERE/poll.sh" mark "$p" "$number" queued "$sha"
       log "tick: $repo#$number queued ($reason)"
+    elif [ "$decision" = error ]; then
+      # The reviews could not be read, so nothing is known: the PR is not
+      # marked gated, and the next tick reads it again.
+      log "tick: $repo#$number left for the next tick ($reason)"
     else
       bash "$HERE/poll.sh" mark "$p" "$number" gated "$updated"
       log "tick: $repo#$number waiting ($reason)"

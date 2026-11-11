@@ -49,6 +49,29 @@ $(pr_line 8 bbb222 stranger)"
     grep -q '^comment=off$' "$f"
 }
 
+@test "a review read that fails leaves the PR for the next tick instead of gating it" {
+    export POLL_PRS="$(pr_line 7 abc123 Cervator)"
+    make_stub gh 'case "$*" in
+      "api user"*) printf "%s\n" "$GH_LOGIN" ;;
+      *"pr list"*) printf "%s\n" "$POLL_PRS" ;;
+      *"--json reviews"*) exit 1 ;;
+    esac'
+    run_naust tick
+    [ "$status" -eq 0 ]
+    grep -q 'could not read the reviews' "$NAUST_LOG"
+    run ! grep -q '^gated=' "$NAUST_DIR/state/seen/MovingBlocks__Terasology/7"
+    [ ! -e "$NAUST_DIR/state/queue/MovingBlocks__Terasology__7.job" ]
+    run_naust tick
+    [ "$(grep -c 'gh pr view 7 ' "$STUB_LOG")" -eq 2 ]
+}
+
+@test "the account check compares logins the way GitHub does, without regard to case" {
+    export GH_LOGIN=Agent-Refr
+    run_naust tick
+    [ "$status" -eq 0 ]
+    grep -q 'pr list' "$STUB_LOG"
+}
+
 @test "a token that is not the configured account's stops the tick before it polls" {
     export GH_LOGIN=someone-else
     run_naust tick

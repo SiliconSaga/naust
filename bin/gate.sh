@@ -28,15 +28,30 @@ jq_literal() { local s="$1"; s="${s//\\/\\\\}"; s="${s//\"/\\\"}"; printf '%s' "
 
 cmd_decide() {
   local profile="$1" repo="$2" number="$3" head="$4"
-  local account forges phrase lphrase laddress reviews login state oid called ignored="" stale="" why
+  local account forges phrase lphrase laddress reviews err login state oid called ignored="" stale="" why
   account="$(cfg .account)"
   [ -n "$account" ] || die "account: is not set in $NAUST_CONFIG; naust cannot tell which calls are for it"
+  case "$account" in *[!A-Za-z0-9-]*) die "account: '$account' is not a GitHub login (letters, digits and hyphens)" ;; esac
   forges="$(trust_keys "$profile" .forges)"
   phrase="$(trust "$profile" .nod_phrase 'haul it in')"
+  # A control character in the phrase would make the jq literal invalid and
+  # every review read fail quietly, so the trust file is refused instead.
+  case "$phrase" in *[[:cntrl:]]*) die "nod_phrase for $profile holds a control character (a line break?); the phrase is one line of text" ;; esac
   lphrase="$(jq_literal "$(printf '%s' "$phrase" | tr '[:upper:]' '[:lower:]')")"
-  laddress="$(jq_literal "@$(printf '%s' "$account" | tr '[:upper:]' '[:lower:]')")"
-  reviews="$(gh pr view "$number" --repo "$repo" --json reviews \
-      --jq ".reviews[] | [.author.login, .state, (.commit.oid // \"\"), (((.body // \"\") | ascii_downcase) as \$b | (\$b | contains(\"$lphrase\")) and (\$b | contains(\"$laddress\")) | tostring)] | @tsv" 2>/dev/null || true)"
+  # The address must be the whole login: "@agent-refr-two" is not a call to
+  # "@agent-refr", so the character after it may not be one a login is made of.
+  laddress="@$(printf '%s' "$account" | tr '[:upper:]' '[:lower:]')([^a-z0-9-]|\$)"
+  err="$(mktemp)"
+  if ! reviews="$(gh pr view "$number" --repo "$repo" --json reviews \
+      --jq ".reviews[] | [.author.login, .state, (.commit.oid // \"\"), (((.body // \"\") | ascii_downcase) as \$b | (\$b | contains(\"$lphrase\")) and (\$b | test(\"$laddress\")) | tostring)] | @tsv" 2>"$err")"; then
+    # A read that failed is not a PR nobody called in: the tick must come back
+    # to it, so the answer is neither run nor wait.
+    log "gate: could not read the reviews of $repo#$number: $(tr '\n' ' ' < "$err")"
+    rm -f "$err"
+    printf 'error\tcould not read the reviews of %s#%s\n' "$repo" "$number"
+    return 0
+  fi
+  rm -f "$err"
   while IFS=$'\t' read -r login state oid called; do
     [ -n "$login" ] || continue
     [ "$state" != DISMISSED ] || continue

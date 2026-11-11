@@ -184,7 +184,7 @@ with_lock() {
 }
 release_lock() {
   local lock="$STATE_DIR/lock"
-  [ "$(cat "$lock/pid" 2>/dev/null)" = "$$" ] && rm -rf "$lock"
+  if [ "$(cat "$lock/pid" 2>/dev/null)" = "$$" ]; then rm -rf "$lock"; fi
   return 0
 }
 

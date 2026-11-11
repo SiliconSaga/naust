@@ -152,12 +152,27 @@ bay_state() { sed -n 's/^state=//p' "$NAUST_DIR/state/bays/bay-1.state"; }
     [ "$(bay_state)" = "free" ]                     # nothing was built, so nothing waits for a human
 }
 
-@test "a base branch that cannot be fetched fails the checkout step" {
+@test "a base branch that cannot be fetched fails the checkout step, still reports, and frees the bay" {
     sed -i 's/^base=develop$/base=nope/' "$JOBFILE"
     run_naust job bay-1 "$JOBFILE"
     [ "$status" -ne 0 ]
     [ "$(step_status 2)" = fail ]
     for id in 3 4 5 5b 5c 6 7 8; do [ "$(step_status $id)" = skipped ]; done
+    [ "$(step_status 9)" = pass ]
+    # what the job knew before the checkout is on record, so the report has something to render
+    [ "$(sed -n 's/^head: //p' "$JOB/job.yaml")" = "$PR_SHA" ]
+    grep -q '^bay: bay-1$' "$JOB/job.yaml"
+    [ -f "$JOB/report.md" ]
+    [ "$(bay_state)" = "free" ]                     # no PR tree to look at: nothing waits for a human
+}
+
+@test "a linked module change request brings that module's tests into the scope" {
+    mkdir -p "$BAY_DIR/components/terasology/modules/Cooking/src/test/java/org/c"
+    printf 'class CookTest {}\n' > "$BAY_DIR/components/terasology/modules/Cooking/src/test/java/org/c/CookTest.java"
+    printf 'with=terasology/modules/Cooking#3\n' >> "$JOBFILE"
+    run_naust job bay-1 "$JOBFILE"
+    grep -q '^class CookTest $' "$JOB/scope.txt"
+    grep -q 'bayws test terasology CookTest' "$STUB_LOG"
 }
 
 @test "a test run on the PR that produces no reports does not pass" {

@@ -23,7 +23,7 @@ seen_dir() { printf '%s/seen/%s\n' "$STATE_DIR" "${1//\//__}"; }
 
 cmd_candidates() {
   local profile="$1" repo dir tmp open=" " count=0
-  local number sha base author head_repo updated f
+  local number sha base author head_repo updated f q
   repo="$(prof "$profile" .repo)"; [ -n "$repo" ] || die "profile $profile has no repo"
   dir="$(seen_dir "$repo")"; mkdir -p "$dir"
   tmp="$(mktemp)"
@@ -37,7 +37,16 @@ cmd_candidates() {
       kv_set "$f" sha "$sha"
       log "poll: $repo#$number at ${sha:0:7} (${author}) seen"
     fi
-    [ "$(kv_get "$f" queued)" = "$sha" ] && continue
+    if [ "$(kv_get "$f" queued)" = "$sha" ]; then
+      # A queued head is not read again, but the PR can be retargeted while
+      # it waits, and the job must test against the base it has now.
+      q="$STATE_DIR/queue/${repo//\//__}__$number.job"
+      if [ -f "$q" ] && [ -n "$base" ] && [ "$(kv_get "$q" base)" != "$base" ]; then
+        kv_set "$q" base "$base"
+        log "poll: $repo#$number now targets $base; the queued job follows"
+      fi
+      continue
+    fi
     [ "$(kv_get "$f" gated)" = "$updated" ] && continue
     printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$profile" "$repo" "$number" "$sha" "$base" "$author" "$head_repo" "$updated"
   done < "$tmp"

@@ -41,6 +41,18 @@ pr_line() { printf '%s\t%s\t%s\t%s\t%s\t%s\t%s' "$1" "$2" develop "$3" "$3/Teras
     [[ "$output" == *$'\t'def456$'\t'* ]]
 }
 
+@test "a queued head whose PR was retargeted gets the new base in its queue file" {
+    export POLL_PRS="$(pr_line 7 abc123 stranger)"
+    run_naust poll candidates terasology
+    run_naust queue put terasology MovingBlocks/Terasology 7 abc123 develop stranger stranger/Terasology
+    run_naust poll mark terasology 7 queued abc123
+    export POLL_PRS="$(printf '%s\t%s\t%s\t%s\t%s\t%s\t%s' 7 abc123 release stranger stranger/Terasology false 2026-10-09T00:00:00Z)"
+    run_naust poll candidates terasology
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]                                 # still queued, so still not a candidate
+    [ "$(sed -n 's/^base=//p' "$NAUST_DIR/state/queue/MovingBlocks__Terasology__7.job")" = "release" ]
+}
+
 @test "drafts are candidates like any other PR: a call is a call" {
     export POLL_PRS="$(pr_line 7 abc123 stranger true)"
     run_naust poll candidates terasology
