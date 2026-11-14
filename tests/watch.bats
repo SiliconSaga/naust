@@ -70,6 +70,17 @@ EOF
     grep -q 'watch: next look in 0s' "$NAUST_LOG"
 }
 
+@test "watch writes the same lines to a file in the state directory, ticks and jobs included" {
+    printf '#!/usr/bin/env bash\n. "%s/lib.sh"\nlog "tick: pretend"\n' "$(dirname "$NAUST")" > "$NAUST_TICK_SCRIPT"
+    NAUST_WATCH_TICKS=1 run_naust watch --every 0s
+    [ "$status" -eq 0 ]
+    f="$NAUST_DIR/state/watch.log"
+    grep -q "watch: a tick every 0s; Ctrl-C stops it; this log is also $f" "$f"
+    grep -q 'naust: tick: pretend' "$f"
+    # the terminal (here NAUST_LOG) got the same
+    grep -q 'naust: tick: pretend' "$NAUST_LOG"
+}
+
 @test "watch looks every five minutes unless told otherwise" {
     NAUST_WATCH_TICKS=1 run_naust watch
     [ "$status" -eq 0 ]
@@ -106,6 +117,18 @@ EOF
     [ ! -d "$NAUST_DIR/state/lock" ]
     [ "$(state_of bay-1)" = free ]
     run ! grep -q 'released the stopped tick' "$NAUST_LOG"
+}
+
+@test "a tick that ignores TERM is killed after the grace, job and all" {
+    make_bay bay-1 free
+    # The job inherits the ignored TERM, so only the KILL ends either of them.
+    mid_job_tick "trap '' TERM"
+    NAUST_WATCH_GRACE=2 start_watch started --every 1s
+    stop_watch
+    [ "$WATCH_RC" -eq 130 ]
+    run ! kill -0 "$(cat "$BATS_TEST_TMPDIR/job.pid")"
+    [ "$(state_of bay-1)" = free ]
+    grep -q 'still running after 2 s; killing them' "$NAUST_LOG"
 }
 
 @test "Ctrl-C between ticks ends the watch at once and touches no bay" {

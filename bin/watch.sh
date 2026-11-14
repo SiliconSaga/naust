@@ -48,16 +48,21 @@ trap on_signal INT TERM
 # The tick is one bash and its job, and the build under that, are the rest of
 # its process group. After a stop, wait for every member to go, and KILL what
 # has not gone after a while, so nothing of the job is still writing to its
-# bay when the bay is handed back. The TERM is repeated on the way: a process
-# the job was starting at the moment of the first one can miss it.
+# bay when the bay is handed back. The TERM is repeated every two seconds on
+# the way: a process the job was starting at the moment of the first one can
+# miss it, while two seconds is long enough for a member's exit trap to finish
+# before a second TERM cuts it short. This runs before the tick is reaped, so a
+# tick that ignores TERM is killed too rather than waited on. The grace is 30 s;
+# the tests shorten it.
+GRACE="${NAUST_WATCH_GRACE:-30}"
 group_gone() { # <pgid>
   local pgid="$1" i
-  for i in $(seq 1 60); do
+  for i in $(seq 1 $(( GRACE * 2 ))); do
     kill -0 -- "-$pgid" 2>/dev/null || return 0
-    kill -TERM -- "-$pgid" 2>/dev/null || true
+    [ $(( i % 4 )) -ne 0 ] || kill -TERM -- "-$pgid" 2>/dev/null || true
     sleep 0.5
   done
-  log "watch: the stopped tick's processes are still running after 30 s; killing them"
+  log "watch: the stopped tick's processes are still running after $GRACE s; killing them"
   kill -KILL -- "-$pgid" 2>/dev/null || true
   sleep 1
 }
@@ -72,8 +77,8 @@ run_child() {
   [ "$STOP" -eq 0 ] || kill -TERM -- "-$CHILD" 2>/dev/null || true
   wait "$CHILD" || true
   if [ "$STOP" -ne 0 ]; then
-    wait "$CHILD" 2>/dev/null || true
     group_gone "$CHILD"
+    wait "$CHILD" 2>/dev/null || true
   fi
   CHILD=""
 }
@@ -113,7 +118,11 @@ stopped_mid_tick() {
   rm -rf "$lock"
 }
 
-log "watch: a tick every $every; Ctrl-C stops it"
+# Everything this terminal shows also goes to a file, so someone (or an agent
+# in another session) can follow the watch without sitting at it.
+export NAUST_TEE_LOG="${NAUST_TEE_LOG:-$STATE_DIR/watch.log}"
+mkdir -p "$(dirname "$NAUST_TEE_LOG")"
+log "watch: a tick every $every; Ctrl-C stops it; this log is also $NAUST_TEE_LOG"
 ticks=0
 while :; do
   IN_TICK=1
