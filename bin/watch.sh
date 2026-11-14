@@ -12,6 +12,11 @@
 #
 #   watch.sh [--every <duration>]    5m by default; 30s, 2m and 1h are durations
 set -euo pipefail
+# Job control, so each tick runs in a process group of its own: the stop then
+# reaches the whole tick, run.sh, job.sh and the build under them, and not only
+# the tick's bash. A background job of a plain script has INT ignored and no
+# group of its own, so neither a Ctrl-C nor a TERM to its pid would end its job.
+set -m
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=bin/lib.sh
 . "$HERE/lib.sh"
@@ -36,22 +41,49 @@ STOP=0 CHILD="" IN_TICK=0
 # shellcheck disable=SC2329   # the trap below calls it
 on_signal() {
   STOP=1
-  [ -z "$CHILD" ] || kill -TERM "$CHILD" 2>/dev/null || true
+  [ -z "$CHILD" ] || kill -TERM -- "-$CHILD" 2>/dev/null || true
 }
 trap on_signal INT TERM
 
-# Run a command as a child and wait for it, so a signal during it runs the trap
-# now; after a stop, wait again so the child is gone before anything is cleaned.
+# The tick is one bash and its job, and the build under that, are the rest of
+# its process group. After a stop, wait for every member to go, and KILL what
+# has not gone after a while, so nothing of the job is still writing to its
+# bay when the bay is handed back. The TERM is repeated on the way: a process
+# the job was starting at the moment of the first one can miss it.
+group_gone() { # <pgid>
+  local pgid="$1" i
+  for i in $(seq 1 60); do
+    kill -0 -- "-$pgid" 2>/dev/null || return 0
+    kill -TERM -- "-$pgid" 2>/dev/null || true
+    sleep 0.5
+  done
+  log "watch: the stopped tick's processes are still running after 30 s; killing them"
+  kill -KILL -- "-$pgid" 2>/dev/null || true
+  sleep 1
+}
+
+# Run a command as a child, in its own group with no terminal to read, and wait
+# for it, so a signal during it runs the trap now. A stop that arrived before
+# the start means nothing more starts, and one that arrived while the child was
+# being started ends it as the trap would have.
 run_child() {
-  "$@" & CHILD=$!
+  [ "$STOP" -eq 0 ] || return 0
+  "$@" < /dev/null & CHILD=$!
+  [ "$STOP" -eq 0 ] || kill -TERM -- "-$CHILD" 2>/dev/null || true
   wait "$CHILD" || true
-  [ "$STOP" -eq 0 ] || wait "$CHILD" 2>/dev/null || true
+  if [ "$STOP" -ne 0 ]; then
+    wait "$CHILD" 2>/dev/null || true
+    group_gone "$CHILD"
+  fi
   CHILD=""
 }
 
 # The tick was killed. Its lock and the bay it was working are its leftovers,
 # unless the lock is held by something still running, in which case the tick
 # had found it held and was about to leave: nothing here is ours to touch.
+# The bays are read under the lock, taken here, so no tick can start a job
+# in between and have its bay mistaken for the stopped one's; a tick that got
+# the lock first keeps its bays, and the stopped job's bay is freed by hand.
 stopped_mid_tick() {
   local lock="$STATE_DIR/lock" owner f name job
   if [ -d "$lock" ]; then
@@ -66,6 +98,11 @@ stopped_mid_tick() {
     rm -rf "$lock"
     log "watch: released the stopped tick's lock"
   fi
+  if ! mkdir "$lock" 2>/dev/null; then
+    log "watch: another tick took the lock already and its bays are its own; a bay left busy by the stopped job is freed by \`naust bay reset <name>\`"
+    return 0
+  fi
+  printf '%s\n' "$$" > "$lock/pid"
   for f in "$STATE_DIR"/bays/*.state; do
     [ -f "$f" ] || continue
     [ "$(kv_get "$f" state)" = busy ] || continue
@@ -73,6 +110,7 @@ stopped_mid_tick() {
     kv_set "$f" state free; kv_set "$f" job ""; kv_set "$f" since "$(now)"
     log "watch: $name was busy with $job; freed, the next job's reset puts it back to base, and \`naust dock\` runs the abandoned PR again"
   done
+  rm -rf "$lock"
 }
 
 log "watch: a tick every $every; Ctrl-C stops it"
