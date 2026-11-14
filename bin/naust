@@ -8,7 +8,8 @@ usage() {
   cat <<'USAGE'
 Usage: naust <command> [args]
 
-  tick                         poll for calls, queue, run one job, exit (the scheduled entry point)
+  tick                         poll for calls, queue, run one job, exit (one pass of the unattended loop)
+  watch [--every <duration>]   tick every 5m (or <duration>) in this terminal until Ctrl-C
   bay add <name> --profile <p> make a bay (ws bay add, then warm it for the profile)
   bay reset <name> [--deep]    reset a bay to base; --deep also drops Gradle outputs
   bay list                     every bay with its state
@@ -28,7 +29,7 @@ USAGE
 cmd="${1:-}"
 case "$cmd" in
   ""|-h|--help|help) usage; exit 0 ;;
-  tick|bay|dock|job|run|report|notify|gate|poll|queue)
+  tick|watch|bay|dock|job|run|report|notify|gate|poll|queue)
     shift
     exec bash "$HERE/$cmd.sh" "$@" ;;
   *) echo "naust: unknown command '$cmd'" >&2; usage >&2; exit 2 ;;
