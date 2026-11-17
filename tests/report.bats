@@ -75,10 +75,11 @@ YAML
     run ! grep -q 'baseline failed; see' "$JOB/report.md"
 }
 
-@test "comment.md is signed by the persona and names no bay path" {
+@test "comment.md opens with what was checked, in no persona's voice, and names no bay path" {
     run_naust report render "$JOB"
     c="$JOB/comment.md"
-    grep -q 'Gooey' "$c"
+    [ "$(head -n1 "$c")" = '**Checked this PR in a bay** (head `abc1234`, base `develop`): built, tested and booted in a local workspace ahead of review, and left there ready for a faster one.' ]
+    run ! grep -q 'Gooey' "$c"
     run ! grep -q "$BATS_TEST_TMPDIR" "$c"
     grep -q 'What needs a human' "$c"
 }
@@ -103,6 +104,45 @@ YAML
     grep -q '| 2 | checkout | not run |' "$JOB/report.md"
     grep -q 'reset failed' "$JOB/report.md"
     run ! grep -q '| PR |' "$JOB/report.md"
+}
+
+@test "known dirt is one line per pattern with a count; unexpected dirt is listed in full" {
+    printf 'terasology/modules/Health\t?? src/test/resources/logback-test.xml\tknown\nterasology/modules/Cooking\t?? src/test/resources/logback-test.xml\tknown\nterasology\t?? natives/stray.dll\tunexpected\nterasology/modules/Health\t M build.gradle\tunexpected\n' > "$JOB/tree.txt"
+    run_naust report render "$JOB"
+    [ "$status" -eq 0 ]
+    r="$JOB/report.md"
+    grep -q -- '- `?? src/test/resources/logback-test.xml` in 2 repositories (known)' "$r"
+    run ! grep -q 'modules/Health: `?? src/test' "$r"
+    run ! grep -q 'modules/Cooking' "$r"
+    grep -q -- '- terasology: `?? natives/stray.dll` (unexpected)' "$r"
+    grep -q -- '- terasology/modules/Health: ` M build.gradle` (unexpected)' "$r"
+    # the human reads the unexpected lines before the known summary
+    [ "$(grep -n 'stray.dll' "$r" | cut -d: -f1)" -lt "$(grep -n '(known)' "$r" | cut -d: -f1)" ]
+}
+
+@test "the PR comment lists unexpected dirt only, and counts the known files in a word" {
+    printf 'terasology/modules/Health\t?? src/test/resources/logback-test.xml\tknown\nterasology/modules/Cooking\t?? src/test/resources/logback-test.xml\tknown\nterasology\t?? natives/stray.dll\tunexpected\n' > "$JOB/tree.txt"
+    run_naust report render "$JOB"
+    c="$JOB/comment.md"
+    grep -q -- '- terasology: `?? natives/stray.dll` (unexpected)' "$c"
+    grep -q -- '- and 2 files the adapter lists as expected (known dirt; the bay'"'"'s report names them)' "$c"
+    run ! grep -q 'logback' "$c"
+}
+
+@test "a tree dirty only with known files is clean in the comment and a count in the report" {
+    printf 'terasology/modules/Health\t?? src/test/resources/logback-test.xml\tknown\n' > "$JOB/tree.txt"
+    run_naust report render "$JOB"
+    grep -q -- '- `?? src/test/resources/logback-test.xml` in 1 repository (known)' "$JOB/report.md"
+    grep -q '^clean, apart from 1 file the adapter lists as expected (known dirt)$' "$JOB/comment.md"
+    run ! grep -q 'logback' "$JOB/comment.md"
+    run ! grep -q 'unexpected dirt' "$JOB/report.md"
+}
+
+@test "a clean tree is clean in both" {
+    : > "$JOB/tree.txt"
+    run_naust report render "$JOB"
+    grep -q '^clean$' "$JOB/report.md"
+    grep -q '^clean$' "$JOB/comment.md"
 }
 
 @test "a moved head is the first thing a human reads" {

@@ -87,7 +87,6 @@ YAML
   cat > "$WORKSPACE/realms/realm-test/naust/terasology.yaml" <<'YAML'
 component: terasology
 repo: MovingBlocks/Terasology
-persona: Gooey
 bay:
   ready_ttl_days: 7
 gradle:

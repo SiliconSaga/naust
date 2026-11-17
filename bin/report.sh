@@ -37,9 +37,8 @@ cmd_junit() {
 yaml_get() { sed -n "s/^$2: //p" "$1" | head -n1; }
 
 cmd_render() {
-  local job="$1" persona repo number head base bay steps_rows="" id name status secs
+  local job="$1" repo number head base bay steps_rows="" id name status secs
   local pr_tot base_tot pr_fail base_fail new_fail old_fail human="" line
-  persona="$(prof "${NAUST_PROFILE:-terasology}" .persona naust)"
   repo="$(yaml_get "$job/job.yaml" repo)"; number="$(yaml_get "$job/job.yaml" number)"
   head="$(yaml_get "$job/job.yaml" head)"; base="$(yaml_get "$job/job.yaml" base)"
   bay="$(yaml_get "$job/job.yaml" bay)"
@@ -100,15 +99,34 @@ cmd_render() {
     fi
   fi
 
-  local tree_section="" launch_section="" launch_status checks_line
+  # Unexpected dirt is what a human has to look at, so it comes first and in
+  # full, in the report and in the comment. Known dirt is what the adapter
+  # said to expect, and a job on a full module set leaves the same known file
+  # in every module: the report has one line per pattern with a count, and the
+  # comment, which lands beside the PR's own diff on GitHub, only says how
+  # many such files there were.
+  local tree_section="" tree_comment="" unexpected="" known_n=0 files launch_section="" launch_status checks_line
   if [ -s "$job/tree.txt" ]; then
-    tree_section="$(awk -F'\t' '{ printf "- %s: `%s` (%s)\n", $1, $2, $3 }' "$job/tree.txt")"
-    if grep -q 'unexpected$' "$job/tree.txt"; then
-      human="$human- the tree has unexpected dirt after the run (see clean tree)."$'\n'
+    unexpected="$(awk -F'\t' '$3 != "known" { printf "- %s: `%s` (%s)\n", $1, $2, $3 }' "$job/tree.txt")"
+    known_n="$(grep -c $'\tknown$' "$job/tree.txt" || true)"
+    files="files"; [ "$known_n" -ne 1 ] || files="file"
+    tree_section="$unexpected"
+    if [ "$known_n" -gt 0 ]; then
+      tree_section="${tree_section:+$tree_section$'\n'}$(awk -F'\t' '
+        $3 == "known" { known[$2]++ }
+        END { for (p in known) printf "- `%s` in %d %s (known)\n", p, known[p], (known[p] == 1 ? "repository" : "repositories") | "sort" }
+      ' "$job/tree.txt")"
     fi
-  else
-    tree_section="clean"
+    if [ -n "$unexpected" ]; then
+      tree_comment="$unexpected"
+      [ "$known_n" -eq 0 ] || tree_comment="$tree_comment"$'\n'"- and $known_n $files the adapter lists as expected (known dirt; the bay's report names them)"
+      human="$human- the tree has unexpected dirt after the run (see clean tree)."$'\n'
+    elif [ "$known_n" -gt 0 ]; then
+      tree_comment="clean, apart from $known_n $files the adapter lists as expected (known dirt)"
+    fi
   fi
+  [ -n "$tree_section" ] || tree_section="clean"
+  [ -n "$tree_comment" ] || tree_comment="clean"
   launch_status="$(awk -F'\t' '$2 == "launch" { print $3 }' "$job/steps.tsv")"
   case "$launch_status" in skipped|"") launch_status="not run" ;; esac
   if [ -f "$job/screenshot.png" ]; then launch_section="; screenshot: \`screenshot.png\` (attached on Discord; in the bay at \`$job/screenshot.png\`)"
@@ -116,7 +134,11 @@ cmd_render() {
   checks_line="$(grep -m1 '^Checks:' "$job/checks.txt" 2>/dev/null || echo 'Checks: not read')"
   human="$human- Run the game and play the change; the boots only prove it starts."$'\n'
 
-  cat > "$job/report.md" <<EOF
+  # One body for both files, with the clean-tree section filled in per reader.
+  # The split on the marker keeps the fill literal, which a pattern
+  # substitution would not with patsub_replacement on.
+  local body before after
+  body="$(cat <<EOF
 # $repo#$number — ${head:0:7} onto $base, $bay
 
 Bay \`$bay\` at \`$job\`.
@@ -134,7 +156,7 @@ $tests_section
 
 ## Clean tree
 
-$tree_section
+@TREE@
 
 ## CI
 
@@ -144,10 +166,13 @@ $checks_line
 
 $human
 EOF
+)"
+  before="${body%%@TREE@*}"; after="${body#*@TREE@}"
+  printf '%s%s%s\n' "$before" "$tree_section" "$after" > "$job/report.md"
   {
-    printf '%s\n' "**$persona checked this PR in a bay** (head \`${head:0:7}\`, base \`$base\`)."
+    printf '%s\n' "**Checked this PR in a bay** (head \`${head:0:7}\`, base \`$base\`): built, tested and booted in a local workspace ahead of review, and left there ready for a faster one."
     printf '\n'
-    sed -e '1d' -e '/^Bay `/d' -e "s|$job|<bay>|g" "$job/report.md"
+    printf '%s%s%s\n' "$before" "$tree_comment" "$after" | sed -e '1d' -e '/^Bay `/d' -e "s|$job|<bay>|g" | cat -s
     printf '\n_This is an automated report; it says what was observed and not whether the change should merge. A maintainer decides that._\n'
   } > "$job/comment.md"
 }
