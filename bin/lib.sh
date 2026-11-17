@@ -19,6 +19,8 @@ NAUST_ENV_FILE="${NAUST_ENV_FILE:-$NAUST_WORKSPACE/.env}"
 log() {
   local line; line="$(printf '%s naust: %s' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*")"
   if [ -n "${NAUST_LOG:-}" ]; then printf '%s\n' "$line" >> "$NAUST_LOG"; else printf '%s\n' "$line" >&2; fi
+  # A copy of every line for a reader who is not at this terminal (`naust watch` sets it).
+  if [ -n "${NAUST_TEE_LOG:-}" ]; then printf '%s\n' "$line" >> "$NAUST_TEE_LOG" 2>/dev/null || true; fi
   if [ -n "${NAUST_BAY_LOG:-}" ] && [ -d "${NAUST_BAY_LOG%/*}" ]; then printf '%s\n' "$line" >> "$NAUST_BAY_LOG" 2>/dev/null || true; fi
 }
 die() { log "ERROR: $*"; [ -n "${NAUST_LOG:-}" ] && printf 'naust: ERROR: %s\n' "$*" >&2; exit 1; }
